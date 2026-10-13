@@ -68,3 +68,31 @@ def test_pas_de_sortie_du_dossier_des_rapports(client):
     connecter(client)
     assert client.get("/rapports/journaliers/..%2F..%2Fconfig.toml").status_code == 404
     assert client.get("/rapports/journaliers/config.toml").status_code == 404
+
+
+def test_entetes_de_securite(client):
+    reponse = client.get("/connexion")
+    assert reponse.headers["X-Frame-Options"] == "DENY"
+    assert "frame-ancestors 'none'" in reponse.headers["Content-Security-Policy"]
+    assert reponse.headers["Cache-Control"] == "no-store"
+
+
+def test_blocage_apres_trop_d_essais(client):
+    for _ in range(5):
+        client.post("/connexion", data={"mot_de_passe": "faux"})
+    # 6e essai, même avec le BON mot de passe : refusé pendant le blocage
+    reponse = client.post("/connexion", data={"mot_de_passe": MOT_DE_PASSE})
+    assert reponse.status_code == 429
+    assert client.get("/").status_code == 302
+
+
+def test_limiteur_se_libere_apres_15_minutes():
+    from pointage.web import LimiteurConnexion
+
+    maintenant = [1000.0]
+    limiteur = LimiteurConnexion(horloge=lambda: maintenant[0])
+    for _ in range(5):
+        limiteur.echec("10.0.0.5")
+    assert limiteur.bloque("10.0.0.5") and not limiteur.bloque("10.0.0.6")
+    maintenant[0] += 15 * 60 + 1
+    assert not limiteur.bloque("10.0.0.5")

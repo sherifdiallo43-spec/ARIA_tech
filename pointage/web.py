@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hmac
 import secrets
+import threading
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -26,6 +27,40 @@ from .config import Config
 DOSSIERS_RAPPORTS = {"journaliers": "Rapports du jour", "mensuels": "Rapports du mois"}
 TYPES = {"arrivee": "Arrivée", "sortie": "Sortie"}
 
+ESSAIS_MAX = 5          # mots de passe faux autorisés...
+BLOCAGE_MINUTES = 15    # ...par appareil, avant un blocage de 15 minutes
+
+
+class LimiteurConnexion:
+    """Bloque un appareil (adresse IP) après trop de mots de passe faux.
+
+    Sans cette limite, un programme pourrait essayer des milliers de mots de
+    passe à la suite. Le compteur est en mémoire : il repart à zéro si le
+    tableau de bord redémarre, ce qui suffit pour un réseau d'école.
+    """
+
+    def __init__(self, horloge=time.monotonic):
+        self.horloge = horloge
+        self.echecs: dict[str, list[float]] = {}
+        self.verrou = threading.Lock()
+
+    def _recents(self, ip: str) -> list[float]:
+        limite = self.horloge() - BLOCAGE_MINUTES * 60
+        self.echecs[ip] = [t for t in self.echecs.get(ip, []) if t > limite]
+        return self.echecs[ip]
+
+    def bloque(self, ip: str) -> bool:
+        with self.verrou:
+            return len(self._recents(ip)) >= ESSAIS_MAX
+
+    def echec(self, ip: str) -> None:
+        with self.verrou:
+            self._recents(ip).append(self.horloge())
+
+    def reussite(self, ip: str) -> None:
+        with self.verrou:
+            self.echecs.pop(ip, None)
+
 
 def create_app(config: Config, mot_de_passe: str) -> Flask:
     app = Flask(__name__, template_folder=str(Path(__file__).parent / "templates"))
@@ -33,6 +68,21 @@ def create_app(config: Config, mot_de_passe: str) -> Flask:
     # le service déconnecte tout le monde, ce qui est acceptable et plus sûr.
     app.secret_key = secrets.token_hex(32)
     app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
+    limiteur = LimiteurConnexion()
+
+    @app.after_request
+    def entetes_securite(reponse):
+        # Interdit d'afficher le tableau de bord dans un autre site (piège à clics),
+        # de deviner le type des fichiers, de charger des scripts d'ailleurs, et
+        # de garder en cache des pages qui contiennent des données d'élèves.
+        reponse.headers["X-Frame-Options"] = "DENY"
+        reponse.headers["X-Content-Type-Options"] = "nosniff"
+        reponse.headers["Referrer-Policy"] = "no-referrer"
+        reponse.headers["Content-Security-Policy"] = (
+            "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+            "form-action 'self'; frame-ancestors 'none'")
+        reponse.headers["Cache-Control"] = "no-store"
+        return reponse
 
     @app.template_filter("heure")
     def filtre_heure(texte):
@@ -65,11 +115,16 @@ def create_app(config: Config, mot_de_passe: str) -> Flask:
     def connexion():
         if request.method == "POST":
             saisi = request.form.get("mot_de_passe", "")
+            ip = request.remote_addr or "?"
+            if limiteur.bloque(ip):
+                flash(f"Trop d'essais. Réessaie dans {BLOCAGE_MINUTES} minutes.")
+                return render_template("connexion.html"), 429
             if hmac.compare_digest(saisi.encode(), mot_de_passe.encode()):
+                limiteur.reussite(ip)
                 session.clear()
                 session["ok"] = True
                 return redirect(url_for("aujourdhui"))
-            time.sleep(1)  # ralentit quelqu'un qui essaierait des mots de passe au hasard
+            limiteur.echec(ip)
             flash("Mot de passe incorrect.")
         return render_template("connexion.html")
 

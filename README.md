@@ -45,6 +45,25 @@ appareils du réseau de l'école (téléphone du directeur, par exemple) : chois
 passe solide, car les noms d'élèves et les téléphones des parents sont des données personnelles.
 Le relevé du prestataire n'est volontairement pas visible dans cette interface.
 
+## Sécurité : à faire dans chaque école
+
+Le logiciel manipule des données d'enfants (noms, présences, téléphones des parents).
+Le code se protège lui-même (mot de passe, blocage après 5 essais faux pendant 15 minutes,
+en-têtes de sécurité, aucune donnée ni secret envoyé sur GitHub), mais l'installation compte autant :
+
+1. **Chiffrer le disque du PC** avec BitLocker (Paramètres Windows > Confidentialité et
+   sécurité > Chiffrement de l'appareil). Sans ça, un PC volé donne accès à toutes les données.
+2. **Un mot de passe long** pour le tableau de bord (`DASHBOARD_PASSWORD`, 12 caractères
+   ou plus), différent pour chaque école, et une session Windows protégée par mot de passe.
+3. **Ne pas utiliser `--reseau` sans HTTPS** : sur le réseau, le mot de passe circule en clair.
+   Par défaut, le tableau de bord n'est ouvert qu'au PC lui-même.
+4. **Protéger la pointeuse** : définir sa clé de communication (Comm Key, à reporter dans
+   `ZK_MOT_DE_PASSE`) et, si possible, la brancher sur un réseau séparé du Wi-Fi des visiteurs.
+   Son protocole n'est pas chiffré.
+5. **Ne jamais copier `.env`** ailleurs que sur ce PC, et ne pas partager le dossier `data/`.
+6. **Informer les parents** que le nom de l'enfant transite par Twilio et WhatsApp (serveurs
+   à l'étranger) quand les alertes sont activées, et le mentionner dans la déclaration à la CDP.
+
 ## Installation (Windows)
 
 Prérequis : Python 3.11 ou plus récent. Sur ce PC, la commande à utiliser est `py`
