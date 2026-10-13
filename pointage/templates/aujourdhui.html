@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block titre %}Aujourd'hui{% endblock %}
+{% block entete %}{% if est_aujourdhui %}<meta http-equiv="refresh" content="30">{% endif %}{% endblock %}
+{% block contenu %}
+<h1>{{ jour_texte }}</h1>
+<p class="sous-titre">
+  <span class="pastille {{ 'ok' if en_ligne }}"></span>
+  {% if en_ligne %}Pointeuse en ligne, dernière lecture à {{ derniere_lecture }}
+  {% elif derniere_lecture %}Pointeuse sans réponse récente, dernière lecture à {{ derniere_lecture }}
+  {% else %}Aucune lecture de la pointeuse pour l'instant{% endif %}
+  {% if est_aujourdhui %} · actualisation automatique{% endif %}
+</p>
+
+<div class="jours">
+  <a class="bouton discret" href="{{ url_for('aujourdhui', jour=veille) }}">← Veille</a>
+  {% if lendemain %}<a class="bouton discret" href="{{ url_for('aujourdhui', jour=lendemain) }}">Lendemain →</a>{% endif %}
+  {% if not est_aujourdhui %}<a class="bouton discret" href="{{ url_for('aujourdhui') }}">Aujourd'hui</a>{% endif %}
+  <form method="get" style="margin:0;display:flex;gap:8px">
+    <input type="date" name="jour" value="{{ jour.isoformat() }}" max="{{ jour.today().isoformat() }}">
+    <button class="bouton" type="submit">Voir</button>
+  </form>
+</div>
+
+<div class="grille">
+  <div class="stat"><div class="nombre present">{{ stats.presents }}</div><div class="libelle">Présents sur {{ stats.nb_eleves }}</div></div>
+  <div class="stat"><div class="nombre absent">{{ stats.absents|length }}</div><div class="libelle">Absents</div></div>
+  <div class="stat"><div class="nombre retard">{{ stats.retards|length }}</div><div class="libelle">Arrivés en retard</div></div>
+  <div class="stat"><div class="nombre">{{ stats.sans_sortie|length + stats.sans_arrivee|length }}</div><div class="libelle">Pointages incomplets</div></div>
+</div>
+
+<div class="deux">
+  <section class="carte">
+    <h2>Derniers pointages</h2>
+    {% if derniers %}
+    <table>
+      <thead><tr><th>Heure</th><th>Élève</th><th>Type</th></tr></thead>
+      <tbody>
+      {% for p in derniers %}
+        <tr>
+          <td>{{ p.horodatage[11:16]|heure }}</td>
+          <td>{% if p.nom %}{{ p.prenom }} {{ p.nom }} <span class="vide">{{ p.classe }}</span>{% else %}<span class="vide">Inconnu</span>{% endif %}</td>
+          <td>{{ types.get(p.type, p.type) }}{% if p.en_retard %} <span class="retard">· retard</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="vide">Aucun pointage pour ce jour.</p>{% endif %}
+  </section>
+
+  <section class="carte">
+    <h2>Absents : parents à contacter</h2>
+    {% if stats.absents %}
+    <table>
+      <thead><tr><th>Élève</th><th>Classe</th><th>Téléphone</th></tr></thead>
+      <tbody>
+      {% for a in stats.absents %}
+        <tr><td>{{ a.nom }}</td><td>{{ a.classe }}</td><td>{{ a.tel }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="vide">Aucun absent.</p>{% endif %}
+  </section>
+</div>
+
+{% for c in stats.par_classe %}
+<section class="carte">
+  <h2>Classe de {{ c.classe }}</h2>
+  <table>
+    <thead><tr><th>Élève</th><th>Statut</th><th>Arrivée</th><th>Sortie</th></tr></thead>
+    <tbody>
+    {% for e in c.eleves %}
+      <tr>
+        <td>{{ e.nom }}</td>
+        {% if e.statut == 'absent' %}
+          <td class="absent">Absent(e)</td><td>-</td><td>-</td>
+        {% else %}
+          <td class="{{ 'retard' if e.statut == 'retard' else 'present' }}">{{ 'Retard' if e.statut == 'retard' else 'Présent(e)' }}</td>
+          <td>{% if e.arrivee %}{{ e.arrivee|heure }}{% else %}<span class="oubli">non pointée</span>{% endif %}</td>
+          <td>{% if e.sortie %}{{ e.sortie|heure }}{% else %}<span class="oubli">non pointée</span>{% endif %}</td>
+        {% endif %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="bilan"><b>Bilan de la classe :</b> {{ c.presents }} présent{{ 's' if c.presents > 1 }} · {{ c.absents }} absent{{ 's' if c.absents > 1 }} · {{ c.retards }} retard{{ 's' if c.retards > 1 }}{% if c.incomplets %} · {{ c.incomplets }} pointage{{ 's' if c.incomplets > 1 }} incomplet{{ 's' if c.incomplets > 1 }}{% endif %}.</p>
+</section>
+{% else %}
+<section class="carte"><p class="vide">Aucun élève inscrit.</p></section>
+{% endfor %}
+{% endblock %}

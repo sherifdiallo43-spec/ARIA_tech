@@ -182,6 +182,22 @@ def cmd_statut(config, args):
           f"dernier vidage : {db.lire_etat(conn, 'dernier_vidage', 'jamais')})")
 
 
+def cmd_web(config, args):
+    from waitress import serve
+
+    from pointage.web import create_app
+
+    mot_de_passe = config.secrets.get("DASHBOARD_PASSWORD", "")
+    if len(mot_de_passe) < 8:
+        sys.exit("Mets un mot de passe d'au moins 8 caractères dans .env (DASHBOARD_PASSWORD=...).")
+    ouvrir_base(config).close()  # crée la base si elle n'existe pas encore
+    # 127.0.0.1 : seul ce PC peut ouvrir le tableau de bord. 0.0.0.0 : tout le réseau de l'école.
+    hote = "0.0.0.0" if args.reseau else "127.0.0.1"
+    print(f"Tableau de bord : http://localhost:{args.port}"
+          + ("  (aussi accessible depuis le réseau de l'école)" if args.reseau else ""))
+    serve(create_app(config, mot_de_passe), host=hote, port=args.port)
+
+
 def cmd_utilisateurs(config, args):
     try:
         utilisateurs = creer_pointeuse(config).lister_utilisateurs()
@@ -212,6 +228,12 @@ def construire_parseur() -> argparse.ArgumentParser:
 
     sous.add_parser("sync", help="une lecture de la pointeuse + envoi des messages").set_defaults(func=cmd_sync)
     sous.add_parser("run", help="lance le service en continu").set_defaults(func=cmd_run)
+
+    s = sous.add_parser("web", help="lance le tableau de bord web")
+    s.add_argument("--port", type=int, default=8000)
+    s.add_argument("--reseau", action="store_true",
+                   help="accessible depuis les autres appareils du réseau (par défaut : ce PC seulement)")
+    s.set_defaults(func=cmd_web)
 
     s = sous.add_parser("simuler", help="ajoute des pointages dans la pointeuse simulée")
     s.add_argument("--jours", type=int, help="génère un historique sur N jours ouvrés passés")

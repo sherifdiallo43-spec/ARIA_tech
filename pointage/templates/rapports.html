@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block titre %}Rapports{% endblock %}
+{% block contenu %}
+<h1>Rapports PDF</h1>
+<p class="sous-titre">Les rapports du jour sont créés automatiquement chaque soir, ceux du mois le 1er du mois suivant.</p>
+
+<div class="deux">
+  <section class="carte">
+    <h2>Créer un rapport du jour</h2>
+    <form method="post" action="{{ url_for('generer') }}" style="display:flex;gap:8px;flex-wrap:wrap">
+      <input type="hidden" name="type" value="jour">
+      <input type="date" name="jour" value="{{ aujourdhui }}" max="{{ aujourdhui }}" required>
+      <button class="bouton" type="submit">Générer</button>
+    </form>
+  </section>
+  <section class="carte">
+    <h2>Créer un rapport du mois</h2>
+    <form method="post" action="{{ url_for('generer') }}" style="display:flex;gap:8px;flex-wrap:wrap">
+      <input type="hidden" name="type" value="mois">
+      <input type="month" name="mois" value="{{ ce_mois }}" max="{{ ce_mois }}" required>
+      <button class="bouton" type="submit">Générer</button>
+    </form>
+  </section>
+</div>
+
+<div class="deux">
+{% for dossier, (titre, fichiers) in liste.items() %}
+  <section class="carte">
+    <h2>{{ titre }}</h2>
+    {% if fichiers %}
+    <ul class="fichiers">
+      {% for f in fichiers %}
+      <li><a href="{{ url_for('telecharger', dossier=dossier, fichier=f) }}" target="_blank">{{ f }}</a></li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="vide">Aucun rapport pour l'instant.</p>{% endif %}
+  </section>
+{% endfor %}
+</div>
+{% endblock %}

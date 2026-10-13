@@ -4,3 +4,5 @@ fpdf2>=2.7.9       # génération des rapports PDF
 python-dotenv>=1.0 # lecture du fichier .env
 schedule>=1.2      # tâches répétées (lecture toutes les 30 s, sauvegarde quotidienne)
 pytest>=8.0        # tests automatiques
+flask>=3.0          # tableau de bord web
+waitress>=3.0       # serveur web (fonctionne bien sous Windows)

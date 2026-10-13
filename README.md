@@ -25,6 +25,26 @@ Le logiciel tourne sur un PC Windows de l'école, branché sur le même réseau 
 | Relevé du prestataire | Le 1er du mois suivant, dans `rapports/prestataire/` : abonnements, détail des paiements, montant dû au prestataire, parents à relancer |
 | Fin d'année | Archivage des pointages dans `archives/` et nettoyage de la base, fiches élèves conservées |
 
+## Tableau de bord web
+
+Une page web, protégée par mot de passe, pour suivre la journée sans ligne de commande :
+**Aujourd'hui** (présents, absents avec le téléphone du parent, retards, derniers pointages,
+actualisation toutes les 30 s, navigation vers les jours précédents) et **Rapports**
+(télécharger ou générer les PDF du jour et du mois).
+
+```powershell
+# 1. Choisis un mot de passe (8 caractères minimum) dans le fichier .env :
+#    DASHBOARD_PASSWORD=ton-mot-de-passe
+# 2. Lance le tableau de bord (en plus de `pt run`, dans un second terminal) :
+pt web
+# 3. Ouvre http://localhost:8000 dans le navigateur
+```
+
+Par défaut, seul ce PC peut l'ouvrir. `pt web --reseau` le rend accessible depuis les autres
+appareils du réseau de l'école (téléphone du directeur, par exemple) : choisis alors un mot de
+passe solide, car les noms d'élèves et les téléphones des parents sont des données personnelles.
+Le relevé du prestataire n'est volontairement pas visible dans cette interface.
+
 ## Installation (Windows)
 
 Prérequis : Python 3.11 ou plus récent. Sur ce PC, la commande à utiliser est `py`
@@ -36,7 +56,7 @@ cd C:\Users\DELL\Documents\pointage-scolaire
 # 1. Environnement virtuel : les bibliothèques du projet restent isolées du reste du PC
 py -m venv .venv
 
-# 2. Installation des bibliothèques (pyzk, twilio, fpdf2, python-dotenv, schedule, pytest)
+# 2. Installation des bibliothèques (pyzk, twilio, fpdf2, flask, waitress...)
 .venv\Scripts\python -m pip install -r requirements.txt
 
 # 3. Fichier des secrets
@@ -78,6 +98,7 @@ Pour voir les messages, simule une heure proche de l'heure actuelle ou à venir.
 | `pt paiement 12 --mois 3` | Enregistre un paiement de 3 mois pour l'élève n° 12 de la pointeuse |
 | `pt sync` | Une seule lecture de la pointeuse, plus l'envoi des messages en attente |
 | `pt run` | Le service en continu (c'est ce qui tourne à l'école) |
+| `pt web [--port N] [--reseau]` | Le tableau de bord web (mot de passe dans `.env`) |
 | `pt simuler --jours N` / `--n N [--heure HH:MM]` | Ajoute des pointages dans la fausse pointeuse |
 | `pt rapport [--jour AAAA-MM-JJ]` | Rapport PDF d'une journée (par défaut : aujourd'hui) |
 | `pt rapport --mois AAAA-MM` | Rapport PDF d'un mois |
@@ -187,6 +208,7 @@ pointage/purge.py        vidage sécurisé de la mémoire du boîtier
 pointage/reports.py      statistiques mensuelles et PDF
 pointage/archive.py      archivage de fin d'année
 pointage/service.py      boucle du service continu
+pointage/web.py          tableau de bord web (Flask) ; pages dans pointage/templates/
 tests/                   tests automatiques (pytest)
 ```
 

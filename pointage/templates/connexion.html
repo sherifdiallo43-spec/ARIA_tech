@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block titre %}Connexion{% endblock %}
+{% block contenu %}
+<div class="centre carte">
+  <h1>Connexion</h1>
+  <p class="sous-titre">Réservé à l'administration de l'école.</p>
+  <form method="post">
+    <p><input type="password" name="mot_de_passe" placeholder="Mot de passe" autofocus required
+              style="width:100%"></p>
+    <button class="bouton" type="submit" style="width:100%">Se connecter</button>
+  </form>
+</div>
+{% endblock %}
