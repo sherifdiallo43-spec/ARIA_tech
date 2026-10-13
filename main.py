@@ -25,6 +25,7 @@ def configurer_logs(config: Config) -> None:
     for gestionnaire in (fichier, ecran):
         gestionnaire.setFormatter(format_)
     logging.basicConfig(level=logging.INFO, handlers=[fichier, ecran])
+    logging.getLogger("twilio").setLevel(logging.WARNING)  # sinon chaque envoi affiche tous les en-têtes HTTP
 
 
 def ouvrir_base(config: Config):
@@ -183,18 +184,28 @@ def cmd_statut(config, args):
 
 
 def cmd_test_whatsapp(config, args):
+    _tester_envoi(config, args, "twilio", "WhatsApp")
+
+
+def cmd_test_sms(config, args):
+    _tester_envoi(config, args, "twilio_sms", "SMS")
+
+
+def _tester_envoi(config, args, mode, nom_canal):
     """Envoie un message de test par Twilio, quel que soit le mode réglé dans config.toml."""
     tel = eleves.normaliser_telephone(args.numero)
-    config.notifications["mode"] = "twilio"
+    config.notifications["mode"] = mode
     envoyeur = notifier.creer_envoyeur(config)
-    message = f"{config.nom_ecole} : test ARIA_point. Si tu lis ce message, WhatsApp fonctionne."
+    message = f"{config.nom_ecole} : test ARIA_point. Si tu lis ce message, {nom_canal} fonctionne."
     variables = {"1": config.nom_ecole, "2": "Élève Test", "3": "est arrivé(e) à l'école", "4": "07h42"}
     try:
         envoyeur.envoyer(tel, message, variables)
     except (notifier.ErreurDefinitive, notifier.ErreurTemporaire) as e:
-        sys.exit(f"Échec de l'envoi à {tel} : {e}\n"
-                 "Bac à sable : ce téléphone a-t-il envoyé le message 'join ...' au numéro Twilio "
-                 "(il expire au bout de 72 h environ) ?")
+        conseil = ""
+        if "63015" in str(e):  # téléphone pas encore inscrit au bac à sable
+            conseil = (" Bac à sable : ce téléphone a-t-il envoyé le message 'join ...' au numéro Twilio"
+                       " (il expire au bout de 72 h environ) ?")
+        sys.exit(f"Échec de l'envoi à {tel} : {e}{conseil}")
     print(f"Message envoyé à {tel}. Regarde ton téléphone.")
 
 
@@ -244,6 +255,10 @@ def construire_parseur() -> argparse.ArgumentParser:
 
     sous.add_parser("sync", help="une lecture de la pointeuse + envoi des messages").set_defaults(func=cmd_sync)
     sous.add_parser("run", help="lance le service en continu").set_defaults(func=cmd_run)
+
+    s = sous.add_parser("test-sms", help="envoie un SMS de test (Twilio)")
+    s.add_argument("numero", help="ex. 76 500 08 43")
+    s.set_defaults(func=cmd_test_sms)
 
     s = sous.add_parser("test-whatsapp", help="envoie un message WhatsApp de test (Twilio)")
     s.add_argument("numero", help="ex. 76 500 08 43")

@@ -101,6 +101,35 @@ class EnvoyeurConsole:
         print(f"[WhatsApp -> {tel}] {message}", flush=True)
 
 
+def _creer_message_twilio(client, **parametres) -> None:
+    """Envoie via Twilio et classe l'erreur : à réessayer plus tard, ou définitive."""
+    from twilio.base.exceptions import TwilioRestException
+
+    try:
+        client.messages.create(**parametres)
+    except TwilioRestException as e:
+        # 4xx = la requête elle-même est mauvaise (numéro invalide...), sauf
+        # 429 (trop de requêtes) qui se règle en attendant.
+        if 400 <= e.status < 500 and e.status != 429:
+            raise ErreurDefinitive(f"Twilio {e.code} : {e.msg}") from e
+        raise ErreurTemporaire(f"Twilio {e.code} : {e.msg}") from e
+    except Exception as e:  # coupure réseau, DNS, délai dépassé...
+        raise ErreurTemporaire(str(e)) from e
+
+
+class EnvoyeurTwilioSMS:
+    """Envoi par SMS via Twilio (texte libre, aucun modèle à faire approuver)."""
+
+    def __init__(self, account_sid: str, auth_token: str, expediteur: str):
+        from twilio.rest import Client
+
+        self.client = Client(account_sid, auth_token)
+        self.expediteur = expediteur
+
+    def envoyer(self, tel: str, message: str, variables: dict) -> None:
+        _creer_message_twilio(self.client, from_=self.expediteur, to=tel, body=message)
+
+
 class EnvoyeurTwilio:
     """Envoi réel par WhatsApp via Twilio."""
 
@@ -112,8 +141,6 @@ class EnvoyeurTwilio:
         self.content_sid = content_sid
 
     def envoyer(self, tel: str, message: str, variables: dict) -> None:
-        from twilio.base.exceptions import TwilioRestException
-
         parametres = {"from_": self.expediteur, "to": f"whatsapp:{tel}"}
         if self.content_sid:
             # Production : modèle de message approuvé par Meta, avec ses variables.
@@ -122,16 +149,7 @@ class EnvoyeurTwilio:
         else:
             # Bac à sable : texte libre.
             parametres["body"] = message
-        try:
-            self.client.messages.create(**parametres)
-        except TwilioRestException as e:
-            # 4xx = la requête elle-même est mauvaise (numéro invalide...), sauf
-            # 429 (trop de requêtes) qui se règle en attendant.
-            if 400 <= e.status < 500 and e.status != 429:
-                raise ErreurDefinitive(f"Twilio {e.code} : {e.msg}") from e
-            raise ErreurTemporaire(f"Twilio {e.code} : {e.msg}") from e
-        except Exception as e:  # coupure réseau, DNS, délai dépassé...
-            raise ErreurTemporaire(str(e)) from e
+        _creer_message_twilio(self.client, **parametres)
 
 
 def creer_envoyeur(config: Config):
@@ -146,7 +164,14 @@ def creer_envoyeur(config: Config):
             raise ValueError(f"Mode twilio : à remplir dans .env : {', '.join(manquants)}")
         return EnvoyeurTwilio(s["TWILIO_ACCOUNT_SID"], s["TWILIO_AUTH_TOKEN"],
                               s["TWILIO_WHATSAPP_FROM"], s.get("TWILIO_CONTENT_SID", ""))
-    raise ValueError(f"Mode de notification inconnu : {mode!r} (attendu : 'console' ou 'twilio')")
+    if mode == "twilio_sms":
+        s = config.secrets
+        manquants = [c for c in ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_SMS_FROM")
+                     if not s.get(c)]
+        if manquants:
+            raise ValueError(f"Mode twilio_sms : à remplir dans .env : {', '.join(manquants)}")
+        return EnvoyeurTwilioSMS(s["TWILIO_ACCOUNT_SID"], s["TWILIO_AUTH_TOKEN"], s["TWILIO_SMS_FROM"])
+    raise ValueError(f"Mode de notification inconnu : {mode!r} (attendu : 'console', 'twilio' ou 'twilio_sms')")
 
 
 def envoyer_en_attente(conn: sqlite3.Connection, envoyeur, config: Config,

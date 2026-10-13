@@ -39,6 +39,7 @@ journalier_apres = "18:00"   # le rapport du jour est généré à partir de cet
 [notifications]
 # "console" : les messages s'affichent à l'écran (tests, démos)
 # "twilio"  : envoi réel par WhatsApp (identifiants dans .env)
+# "twilio_sms" : envoi par SMS via Twilio (texte libre, pas de modèle à approuver)
 mode = "console"
 age_max_minutes = 120   # au-delà, un pointage récupéré en retard n'est plus notifié
 max_tentatives = 10     # après 10 échecs, le message est abandonné

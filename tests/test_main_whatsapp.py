@@ -26,7 +26,15 @@ def test_message_de_test_envoye_au_numero_normalise(config, monkeypatch, capsys)
 
 def test_echec_explique_le_bac_a_sable(config, monkeypatch):
     monkeypatch.setattr(notifier, "creer_envoyeur",
-                        lambda c: Recorder(notifier.ErreurDefinitive("Twilio 63015")))
+                        lambda c: Recorder(notifier.ErreurDefinitive("Twilio 63015 : sandbox")))
     with pytest.raises(SystemExit) as erreur:
         main.cmd_test_whatsapp(config, argparse.Namespace(numero="765000843"))
     assert "join" in str(erreur.value)
+
+
+def test_pas_de_conseil_join_pour_une_autre_erreur(config, monkeypatch):
+    monkeypatch.setattr(notifier, "creer_envoyeur",
+                        lambda c: Recorder(notifier.ErreurDefinitive("Twilio 21654 : ContentSid Required")))
+    with pytest.raises(SystemExit) as erreur:
+        main.cmd_test_whatsapp(config, argparse.Namespace(numero="765000843"))
+    assert "21654" in str(erreur.value) and "join" not in str(erreur.value)
