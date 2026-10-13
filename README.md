@@ -98,6 +98,7 @@ Pour voir les messages, simule une heure proche de l'heure actuelle ou à venir.
 | `pt paiement 12 --mois 3` | Enregistre un paiement de 3 mois pour l'élève n° 12 de la pointeuse |
 | `pt sync` | Une seule lecture de la pointeuse, plus l'envoi des messages en attente |
 | `pt run` | Le service en continu (c'est ce qui tourne à l'école) |
+| `pt test-whatsapp NUMERO` | Envoie un message WhatsApp de test pour vérifier le compte Twilio |
 | `pt web [--port N] [--reseau]` | Le tableau de bord web (mot de passe dans `.env`) |
 | `pt simuler --jours N` / `--n N [--heure HH:MM]` | Ajoute des pointages dans la fausse pointeuse |
 | `pt rapport [--jour AAAA-MM-JJ]` | Rapport PDF d'une journée (par défaut : aujourd'hui) |

@@ -182,6 +182,22 @@ def cmd_statut(config, args):
           f"dernier vidage : {db.lire_etat(conn, 'dernier_vidage', 'jamais')})")
 
 
+def cmd_test_whatsapp(config, args):
+    """Envoie un message de test par Twilio, quel que soit le mode réglé dans config.toml."""
+    tel = eleves.normaliser_telephone(args.numero)
+    config.notifications["mode"] = "twilio"
+    envoyeur = notifier.creer_envoyeur(config)
+    message = f"{config.nom_ecole} : test ARIA_point. Si tu lis ce message, WhatsApp fonctionne."
+    variables = {"1": config.nom_ecole, "2": "Élève Test", "3": "est arrivé(e) à l'école", "4": "07h42"}
+    try:
+        envoyeur.envoyer(tel, message, variables)
+    except (notifier.ErreurDefinitive, notifier.ErreurTemporaire) as e:
+        sys.exit(f"Échec de l'envoi à {tel} : {e}\n"
+                 "Bac à sable : ce téléphone a-t-il envoyé le message 'join ...' au numéro Twilio "
+                 "(il expire au bout de 72 h environ) ?")
+    print(f"Message envoyé à {tel}. Regarde ton téléphone.")
+
+
 def cmd_web(config, args):
     from waitress import serve
 
@@ -228,6 +244,10 @@ def construire_parseur() -> argparse.ArgumentParser:
 
     sous.add_parser("sync", help="une lecture de la pointeuse + envoi des messages").set_defaults(func=cmd_sync)
     sous.add_parser("run", help="lance le service en continu").set_defaults(func=cmd_run)
+
+    s = sous.add_parser("test-whatsapp", help="envoie un message WhatsApp de test (Twilio)")
+    s.add_argument("numero", help="ex. 76 500 08 43")
+    s.set_defaults(func=cmd_test_whatsapp)
 
     s = sous.add_parser("web", help="lance le tableau de bord web")
     s.add_argument("--port", type=int, default=8000)
