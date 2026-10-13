@@ -408,7 +408,7 @@ def _pied(pdf, genere_le: datetime) -> None:
     pdf.ln(2)
     pdf.set_text_color(GRIS)
     pdf.set_font("Helvetica", "I", 8)
-    pdf.cell(0, 6, _t(f"Généré automatiquement le {genere_le:%d/%m/%Y à %Hh%M}."),
+    pdf.cell(0, 6, _t(f"Généré automatiquement par ARIA_point (ARIA_tech) le {genere_le:%d/%m/%Y à %Hh%M}."),
              new_x="LMARGIN", new_y="NEXT")
 
 

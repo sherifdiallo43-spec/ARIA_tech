@@ -1,4 +1,6 @@
-# Pointage scolaire
+# ARIA_point
+
+Produit d'**ARIA_tech** : système de pointage scolaire.
 
 Passerelle entre une pointeuse biométrique **ZKTeco** et les parents d'élèves :
 chaque empreinte posée à l'entrée de l'école déclenche un message **WhatsApp** au
