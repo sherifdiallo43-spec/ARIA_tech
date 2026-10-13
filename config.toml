@@ -1,0 +1,57 @@
+# Réglages de l'école. Ce fichier n'est PAS secret (les secrets sont dans .env).
+# Modifie-le pour chaque école, puis redémarre le service.
+
+[ecole]
+nom = "Groupe Scolaire Exemple"
+
+[pointeuse]
+# "simulee" : pas de boîtier, les pointages sont générés par la commande `simuler`
+# "zk"      : vraie pointeuse ZKTeco sur le réseau local
+mode = "simulee"
+ip = "192.168.1.201"
+port = 4370
+timeout = 5
+forcer_udp = false               # à passer à true pour certains vieux modèles
+intervalle_sync_secondes = 30    # fréquence de lecture de la pointeuse
+anti_doublon_minutes = 30        # deux pointages du même élève à moins de 30 min = un seul
+# Vidage automatique de la mémoire du boîtier, une fois tout mis en sécurité.
+# Il se déclenche quand la mémoire dépasse ce nombre de pointages (0 = jamais),
+# et seulement dans la plage horaire indiquée (le boîtier est bloqué quelques secondes).
+# Si le PC est éteint le soir, choisis une plage où il est allumé (ex. ["12:30", "14:00"]).
+vider_au_dela = 20000
+vidage_auto_entre = ["18:00", "23:59"]
+
+# Deux pointages par jour : l'arrivée le matin et la sortie à la fin des cours.
+# Le premier pointage de la journée est l'arrivée, le suivant est la sortie.
+[horaires]
+retard_apres = "08:00"         # arrivée après cette heure = retard
+sortie_seule_apres = "16:00"   # un PREMIER pointage après cette heure est une sortie
+                               # (l'élève a oublié de pointer en arrivant)
+
+[abonnement]
+prix_mensuel = 1000   # FCFA
+essai_jours = 30      # durée de l'essai gratuit à l'inscription
+part_prestataire_pourcent = 100   # part des abonnements reversée au prestataire
+
+[rapports]
+journalier_apres = "18:00"   # le rapport du jour est généré à partir de cette heure
+
+[notifications]
+# "console" : les messages s'affichent à l'écran (tests, démos)
+# "twilio"  : envoi réel par WhatsApp (identifiants dans .env)
+mode = "console"
+age_max_minutes = 120   # au-delà, un pointage récupéré en retard n'est plus notifié
+max_tentatives = 10     # après 10 échecs, le message est abandonné
+# Retire un type de cette liste pour réduire le nombre de messages (et le coût).
+types_notifies = ["arrivee", "sortie"]
+
+[sauvegarde]
+retention_jours = 30    # les sauvegardes plus anciennes sont supprimées
+
+[chemins]
+base = "data/pointage.db"
+pointeuse_simulee = "data/pointeuse_simulee.json"
+sauvegardes = "backups"
+archives = "archives"
+rapports = "rapports"
+logs = "logs"
