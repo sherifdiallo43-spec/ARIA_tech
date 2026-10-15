@@ -1,0 +1,19 @@
+zk_user_id;jour;debut;fin;classe;matiere
+900;lundi;08:00;10:00;3e A;Maths
+900;lundi;10:00;12:00;4e A;Maths
+900;mardi;15:00;17:00;3e A;Maths
+900;jeudi;08:00;10:00;4e A;Maths
+900;samedi;08:00;10:00;3e A;Maths
+901;lundi;10:00;12:00;3e A;Français
+901;mercredi;08:00;10:00;4e A;Français
+901;jeudi;15:00;17:00;3e A;Français
+901;vendredi;08:00;12:00;4e A;Français
+902;mardi;08:00;10:00;3e A;SVT
+902;vendredi;15:00;17:00;4e A;SVT
+902;samedi;10:00;12:00;4e A;SVT
+903;lundi;07:30;12:30;;Surveillance
+903;mardi;07:30;12:30;;Surveillance
+903;mercredi;07:30;12:30;;Surveillance
+903;jeudi;07:30;12:30;;Surveillance
+903;vendredi;07:30;12:30;;Surveillance
+903;samedi;07:30;12:30;;Surveillance

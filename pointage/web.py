@@ -144,8 +144,10 @@ def create_app(config: Config, mot_de_passe: str) -> Flask:
         stats = reports.calculer_jour(conn(), jour)
 
         derniers = conn().execute(
-            "SELECT p.horodatage, p.type, p.en_retard, e.prenom, e.nom, e.classe "
+            "SELECT p.horodatage, p.type, p.en_retard, COALESCE(e.prenom, s.prenom) AS prenom, "
+            "  COALESCE(e.nom, s.nom) AS nom, COALESCE(e.classe, s.fonction) AS classe "
             "FROM pointages p LEFT JOIN eleves e ON e.zk_user_id = p.zk_user_id "
+            "LEFT JOIN personnel s ON s.zk_user_id = p.zk_user_id "
             "WHERE substr(p.horodatage, 1, 10) = ? ORDER BY p.horodatage DESC LIMIT 12",
             (jour.isoformat(),)).fetchall()
 

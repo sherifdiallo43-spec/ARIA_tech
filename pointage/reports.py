@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
+from . import personnel
 from .config import Config, lire_heure
 from .db import dt_texte
 from .subscriptions import statut_abonnement
@@ -44,6 +45,11 @@ def _texte_jour(jour: date) -> str:
     return dt_texte(datetime.combine(jour, time()))
 
 
+# Les pointages du personnel ne doivent pas fausser les chiffres des élèves
+# (un prof qui pointe un samedi ne fait pas de ce samedi un jour d'école).
+_SEULEMENT_ELEVES = "AND zk_user_id IN (SELECT zk_user_id FROM eleves) "
+
+
 def _resume_pointages(conn: sqlite3.Connection, debut: str, fin: str) -> dict:
     """Pour chaque (élève, jour) : heure d'arrivée, heure de sortie, retard.
 
@@ -54,7 +60,7 @@ def _resume_pointages(conn: sqlite3.Connection, debut: str, fin: str) -> dict:
         "  MIN(CASE WHEN type = 'arrivee' THEN substr(horodatage, 12, 5) END) AS arrivee, "
         "  MAX(CASE WHEN type = 'sortie' THEN substr(horodatage, 12, 5) END) AS sortie, "
         "  MAX(en_retard) AS retard "
-        "FROM pointages WHERE horodatage >= ? AND horodatage < ? "
+        "FROM pointages WHERE horodatage >= ? AND horodatage < ? " + _SEULEMENT_ELEVES +
         "GROUP BY zk_user_id, jour", (debut, fin))
     return {(r["zk_user_id"], r["jour"]): r for r in lignes}
 
@@ -175,8 +181,8 @@ def calculer_stats(conn: sqlite3.Connection, annee: int, mois: int, part_pourcen
     # Jour d'école = jour où au moins un élève a pointé (week-ends et fériés exclus d'office).
     jours = sorted({jour for _, jour in resume})
     total_pointages = conn.execute(
-        "SELECT COUNT(*) FROM pointages WHERE horodatage >= ? AND horodatage < ?", (debut, fin)
-    ).fetchone()[0]
+        "SELECT COUNT(*) FROM pointages WHERE horodatage >= ? AND horodatage < ? " + _SEULEMENT_ELEVES,
+        (debut, fin)).fetchone()[0]
 
     classes: dict[str, dict] = {}
     suivis = []
@@ -562,7 +568,95 @@ def generer_pdf_releve(releve: ReleveMois, nom_ecole: str, chemin: Path,
     return _enregistrer(pdf, chemin)
 
 
+# --- Rapport du personnel (confidentiel, pour le directeur) -------------------------
+
+CONFIDENTIEL = "Rapport du personnel · confidentiel, destiné au directeur"
+STATUTS_PERSONNEL = {"present": ("Présent(e)", VERT), "retard": ("Retard", ORANGE),
+                     "absent": ("Absent(e)", ROUGE), "repos": ("Pas de cours", GRIS)}
+
+
+def _ligne_personnel(m: dict) -> list:
+    libelle, couleur = STATUTS_PERSONNEL[m["statut"]]
+    prevu = m["prevu"] or "-"
+    if m["statut"] in ("absent", "repos"):
+        return [m["nom"], m["fonction"], prevu,
+                (libelle, _style(couleur, gras=m["statut"] == "absent")), "-", "-", "-"]
+    sortie = _heure(m["sortie"]) if m["sortie"] else ("oubliée", _style(ORANGE, gras=False, italique=True))
+    return [m["nom"], m["fonction"], prevu, (libelle, _style(couleur)),
+            _heure(m["arrivee"]), sortie, personnel.duree(m["minutes"])]
+
+
+def _constat(cours: dict):
+    if cours["etat"] == "retard":
+        return (f"Retard de {cours['retard']} min", _style(ORANGE))
+    return ("Cours manqué", _style(ROUGE))
+
+
+def generer_pdf_personnel_jour(lignes: list[dict], jour: date, nom_ecole: str, chemin: Path,
+                               tolerance: int, genere_le: datetime | None = None) -> Path:
+    date_txt = _date_longue(jour)
+    pdf = _nouveau_pdf(CONFIDENTIEL, nom_ecole, date_txt)
+    compte = Counter(m["statut"] for m in lignes)
+
+    _titre(pdf, "Vue d'ensemble")
+    _tableau(pdf, ["Indicateur", "Nombre"], [
+        ["Personnel attendu ce jour", len(lignes) - compte["repos"]],
+        ["Présents", (str(compte["present"] + compte["retard"]), _style(VERT))],
+        ["Absents", (str(compte["absent"]), _style(ROUGE))],
+        ["Cours commencés en retard", (str(sum(m["retards"] for m in lignes)), _style(ORANGE))],
+        ["Cours manqués", (str(sum(m["manques"] for m in lignes)), _style(ROUGE))],
+        ["Sorties non pointées", sum(1 for m in lignes if m["incomplet"])],
+    ], (120, 60))
+    pdf.ln(4)
+
+    _titre(pdf, f"Présence · {date_txt}")
+    _tableau_ou_rien(pdf, ["Nom", "Fonction", "Cours", "Statut", "Arrivée", "Sortie", "Heures"],
+                     [_ligne_personnel(m) for m in lignes], (35, 30, 28, 28, 20, 20, 19),
+                     "Aucun membre du personnel inscrit.")
+
+    _titre(pdf, "Retards et cours manqués")
+    _tableau_ou_rien(pdf, ["Nom", "Cours", "Classe", "Matière", "Constat"],
+                     [[m["nom"], f"{_heure(c['debut'])}-{_heure(c['fin'])}", c["classe"] or "-",
+                       c["matiere"] or "-", _constat(c)]
+                      for m in lignes for c in m["cours"] if c["etat"] != "ok"],
+                     (40, 28, 25, 42, 45), "Tous les cours prévus ont commencé à l'heure.")
+    _texte(pdf, f"arrivée plus de {tolerance} min après le début du cours. Cours manqué : personne "
+                f"absente pendant toute la durée du cours. Heures : temps de présence (une sortie "
+                f"non pointée n'est pas comptée).", gras="Retard :")
+
+    _pied(pdf, genere_le or datetime.now())
+    return _enregistrer(pdf, chemin)
+
+
+def generer_pdf_personnel_mois(lignes: list[dict], annee: int, mois: int, nom_ecole: str, chemin: Path,
+                               tolerance: int, genere_le: datetime | None = None) -> Path:
+    pdf = _nouveau_pdf(CONFIDENTIEL, nom_ecole, f"{MOIS_FR[mois - 1].capitalize()} {annee}")
+
+    _titre(pdf, "Présence et heures du mois")
+    _tableau_ou_rien(pdf, ["Nom", "Fonction", "Jours", "Absences", "Retards", "Manqués", "Heures"],
+                     [[m["nom"], m["fonction"], m["prevus"],
+                       (str(m["absences"]), _style(ROUGE)) if m["absences"] else "0",
+                       (str(m["retards"]), _style(ORANGE)) if m["retards"] else "0",
+                       (str(m["manques"]), _style(ROUGE)) if m["manques"] else "0",
+                       personnel.duree(m["minutes"])] for m in lignes],
+                     (34, 32, 18, 24, 22, 25, 25), "Aucun membre du personnel inscrit.")
+
+    _texte(pdf, "jours où l'établissement a fonctionné et où la personne avait cours.", gras="Jours :")
+    _texte(pdf, "jours prévus sans aucun pointage.", gras="Absences :")
+    _texte(pdf, f"cours commencés plus de {tolerance} min en retard.", gras="Retards :")
+    _texte(pdf, "cours où la personne n'était pas là, jours d'absence compris.", gras="Manqués :")
+    _texte(pdf, "temps de présence (arrivée -> sortie). Une sortie non pointée n'est pas comptée.",
+           gras="Heures :")
+
+    _pied(pdf, genere_le or datetime.now())
+    return _enregistrer(pdf, chemin)
+
+
 # --- Génération (manuelle ou automatique) ------------------------------------------
+
+def _tolerance(config: Config) -> int:
+    return int(config.personnel.get("tolerance_retard_minutes", 5))
+
 
 def chemin_rapport_jour(config: Config, jour: date) -> Path:
     return config.chemin("rapports") / "journaliers" / f"rapport_{jour.isoformat()}.pdf"
@@ -585,6 +679,48 @@ def generer_rapport(conn: sqlite3.Connection, config: Config, annee: int, mois: 
                          chemin_rapport(config, annee, mois))
     log.info("Rapport mensuel généré : %s", chemin)
     return chemin
+
+
+def chemin_personnel_jour(config: Config, jour: date) -> Path:
+    return config.chemin("rapports") / "personnel" / "journaliers" / f"personnel_{jour.isoformat()}.pdf"
+
+
+def chemin_personnel_mois(config: Config, annee: int, mois: int) -> Path:
+    return config.chemin("rapports") / "personnel" / "mensuels" / f"personnel_{annee}-{mois:02d}.pdf"
+
+
+def generer_rapport_personnel_jour(conn: sqlite3.Connection, config: Config, jour: date) -> Path:
+    tolerance = _tolerance(config)
+    chemin = generer_pdf_personnel_jour(personnel.calculer_jour(conn, jour, tolerance), jour,
+                                        config.nom_ecole, chemin_personnel_jour(config, jour), tolerance)
+    log.info("Rapport du personnel du jour généré : %s", chemin)
+    return chemin
+
+
+def generer_rapport_personnel_mois(conn: sqlite3.Connection, config: Config, annee: int, mois: int) -> Path:
+    tolerance = _tolerance(config)
+    chemin = generer_pdf_personnel_mois(personnel.calculer_mois(conn, annee, mois, tolerance), annee, mois,
+                                        config.nom_ecole, chemin_personnel_mois(config, annee, mois), tolerance)
+    log.info("Rapport du personnel du mois généré : %s", chemin)
+    return chemin
+
+
+def periode_jour(jour: date) -> str:
+    return _date_longue(jour)
+
+
+def periode_mois(annee: int, mois: int) -> str:
+    return f"{MOIS_FR[mois - 1]} {annee}"
+
+
+def rapports_personnel_recents(config: Config, aujourd_hui: date) -> list[tuple[Path, str]]:
+    """Rapports du personnel qui peuvent encore partir par email : 7 derniers jours
+    et mois précédent. Plus ancien, on ne l'envoie plus."""
+    liste = [(chemin_personnel_jour(config, j), periode_jour(j))
+             for j in (aujourd_hui - timedelta(days=n) for n in range(7, -1, -1))]
+    annee, mois = mois_precedent(aujourd_hui)
+    liste.append((chemin_personnel_mois(config, annee, mois), periode_mois(annee, mois)))
+    return liste
 
 
 def mois_precedent(jour: date) -> tuple[int, int]:
@@ -622,6 +758,16 @@ def rapports_automatiques(conn: sqlite3.Connection, config: Config,
         crees.append(generer_rapport(conn, config, annee, mois))
     if not chemin_releve(config, annee, mois).exists() and _a_des_pointages(conn, *_bornes_mois(annee, mois)):
         crees.append(generer_releve(conn, config, annee, mois))
+
+    # Rapports du personnel, seulement si l'école a inscrit du personnel.
+    if personnel.lister(conn):
+        for jour in jours:
+            if (not chemin_personnel_jour(config, jour).exists()
+                    and _a_des_pointages(conn, _texte_jour(jour), _texte_jour(jour + timedelta(days=1)))):
+                crees.append(generer_rapport_personnel_jour(conn, config, jour))
+        if (not chemin_personnel_mois(config, annee, mois).exists()
+                and _a_des_pointages(conn, *_bornes_mois(annee, mois))):
+            crees.append(generer_rapport_personnel_mois(conn, config, annee, mois))
     return crees
 
 

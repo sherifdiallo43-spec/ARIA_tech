@@ -1,7 +1,8 @@
 """Le service qui tourne en continu sur le PC de l'école.
 
 Toutes les 30 s : lire la pointeuse, puis envoyer les messages en attente.
-Toutes les heures : sauvegarde (si plus de 24 h), rapports du jour et du mois (si absents)
+Toutes les heures : sauvegarde (si plus de 24 h), rapports du jour et du mois (si absents),
+envoi au directeur des rapports du personnel pas encore envoyés,
 et vidage de la mémoire de la pointeuse (si elle dépasse le seuil).
 Toutes les 6 h : remettre la pointeuse à l'heure.
 
@@ -12,10 +13,11 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import date
 
 import schedule
 
-from . import backup, collector, db, notifier, purge, reports
+from . import backup, collector, courriel, db, notifier, purge, reports
 from .config import Config
 from .device import creer_pointeuse
 
@@ -27,6 +29,7 @@ def lancer(config: Config) -> None:
     db.initialiser(conn)
     pointeuse = creer_pointeuse(config)
     envoyeur = notifier.creer_envoyeur(config)
+    envoyeur_email = courriel.creer_envoyeur(config)
     intervalle = int(config.pointeuse.get("intervalle_sync_secondes", 30))
 
     def cycle_pointage():
@@ -45,6 +48,11 @@ def lancer(config: Config) -> None:
             reports.rapports_automatiques(conn, config)
         except Exception:
             log.exception("Erreur pendant la sauvegarde ou le rapport.")
+        try:
+            courriel.envoyer_en_attente(conn, config, envoyeur_email,
+                                        reports.rapports_personnel_recents(config, date.today()))
+        except Exception:
+            log.exception("Erreur pendant l'envoi des rapports au directeur.")
         try:
             purge.vider_si_necessaire(conn, pointeuse, config)
         except Exception as e:

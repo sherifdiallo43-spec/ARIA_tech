@@ -8,9 +8,11 @@ import sys
 from datetime import date, datetime, timedelta
 from logging.handlers import RotatingFileHandler
 
-from pointage import archive, backup, collector, db, eleves, notifier, purge, reports, service
+from pointage import (archive, backup, collector, courriel, db, eleves, notifier, personnel, purge,
+                      reports, service)
 from pointage.config import Config, charger
-from pointage.device import PointeuseSimulee, PointageBrut, creer_pointeuse, generer_journee
+from pointage.device import (PointeuseSimulee, PointageBrut, creer_pointeuse, generer_journee,
+                             generer_journee_personnel)
 from pointage.subscriptions import enregistrer_paiement, statut_abonnement
 
 
@@ -50,6 +52,46 @@ def cmd_import_eleves(config, args):
         print(f"  ERREUR {erreur}")
 
 
+def cmd_import_personnel(config, args):
+    conn = ouvrir_base(config)
+    crees, maj, erreurs = personnel.importer_csv(conn, args.fichier, date.today())
+    print(f"{crees} membre(s) du personnel créé(s), {maj} mis à jour.")
+    for erreur in erreurs:
+        print(f"  ERREUR {erreur}")
+
+
+def cmd_import_emploi_du_temps(config, args):
+    conn = ouvrir_base(config)
+    cours, membres, erreurs = personnel.importer_emploi_du_temps(conn, args.fichier)
+    print(f"{cours} cours importé(s) pour {membres} membre(s) du personnel.")
+    for erreur in erreurs:
+        print(f"  ERREUR {erreur}")
+
+
+def cmd_rapport_personnel(config, args):
+    conn = ouvrir_base(config)
+    if args.mois:
+        annee, mois = (int(x) for x in args.mois.split("-"))
+        chemin = reports.generer_rapport_personnel_mois(conn, config, annee, mois)
+        periode = reports.periode_mois(annee, mois)
+    else:
+        jour = date.fromisoformat(args.jour) if args.jour else date.today()
+        chemin = reports.generer_rapport_personnel_jour(conn, config, jour)
+        periode = reports.periode_jour(jour)
+    print(f"Rapport du personnel créé : {chemin}")
+    if args.envoyer:
+        courriel.envoyer_rapport(conn, config, courriel.creer_envoyeur(config), chemin, periode)
+        print(f"Envoyé à {config.directeur.get('email')}.")
+
+
+def cmd_test_email(config, args):
+    try:
+        courriel.tester(config, args.adresse)
+    except Exception as e:
+        sys.exit(f"Échec de l'envoi à {args.adresse} : {e}")
+    print(f"Email envoyé à {args.adresse} (mode {config.directeur.get('mode', 'console')}).")
+
+
 def cmd_paiement(config, args):
     conn = ouvrir_base(config)
     fin = enregistrer_paiement(conn, args.zk_id, args.mois, config.abonnement["prix_mensuel"],
@@ -81,19 +123,23 @@ def cmd_simuler(config, args):
     conn = ouvrir_base(config)
     zk_ids = [r["zk_user_id"] for r in conn.execute(
         "SELECT zk_user_id FROM eleves WHERE actif_scolarite = 1")]
-    if not zk_ids:
+    equipe = personnel.lister(conn)
+    if not zk_ids and not equipe:
         sys.exit("Aucun élève : lance d'abord import-eleves.")
     pointeuse = PointeuseSimulee(config.chemin("pointeuse_simulee"))
     rng = random.Random(args.graine)
 
     if args.jours:
-        # Historique : les N derniers jours ouvrés (lundi à vendredi), sans aujourd'hui.
+        # Historique : les N derniers jours de classe (lundi à samedi), sans aujourd'hui.
         pointages, jour = [], date.today()
         jours_faits = 0
         while jours_faits < args.jours:
             jour -= timedelta(days=1)
-            if jour.weekday() < 5:
+            if jour.weekday() < 6:  # au Sénégal : cours du lundi au samedi
                 pointages += generer_journee(zk_ids, jour, rng)
+                cours = [(m["zk_user_id"], personnel.creneaux_du_jour(conn, m["zk_user_id"], jour))
+                         for m in equipe]
+                pointages += generer_journee_personnel([c for c in cours if c[1]], jour, rng)
                 jours_faits += 1
     else:
         # Pointages "en direct" pour quelques élèves : maintenant, ou aujourd'hui
@@ -103,6 +149,7 @@ def cmd_simuler(config, args):
             heures, minutes = (int(x) for x in args.heure.split(":"))
             moment = moment.replace(hour=heures, minute=minutes, second=0)
         choisis = rng.sample(zk_ids, min(args.n, len(zk_ids)))
+        choisis += rng.sample([m["zk_user_id"] for m in equipe], min(args.profs, len(equipe)))
         pointages = [PointageBrut(zk_id, moment) for zk_id in choisis]
     pointeuse.ajouter(pointages)
     print(f"{len(pointages)} pointage(s) ajouté(s) dans la pointeuse simulée.")
@@ -174,6 +221,7 @@ def cmd_statut(config, args):
     print(f"École               : {config.nom_ecole}")
     print(f"Élèves              : {len(liste)} (payé : {statuts['actif']}, essai : {statuts['essai']}, "
           f"expiré : {statuts['expire']})")
+    print(f"Personnel           : {len(personnel.lister(conn))}")
     print(f"Pointages du jour   : {pointages_jour}")
     print(f"Messages en attente : {attente}")
     print(f"Dernière lecture    : {db.lire_etat(conn, 'derniere_sync', 'jamais')}")
@@ -246,6 +294,25 @@ def construire_parseur() -> argparse.ArgumentParser:
     s.add_argument("fichier")
     s.set_defaults(func=cmd_import_eleves)
 
+    s = sous.add_parser("import-personnel", help="importe ou met à jour les profs et le personnel depuis un CSV")
+    s.add_argument("fichier")
+    s.set_defaults(func=cmd_import_personnel)
+
+    s = sous.add_parser("import-emploi-du-temps", help="importe l'emploi du temps du personnel (une ligne par cours)")
+    s.add_argument("fichier")
+    s.set_defaults(func=cmd_import_emploi_du_temps)
+
+    s = sous.add_parser("rapport-personnel", help="rapport PDF du personnel pour le directeur (jour ou mois)")
+    groupe = s.add_mutually_exclusive_group()
+    groupe.add_argument("--jour", help="AAAA-MM-JJ (par défaut : aujourd'hui)")
+    groupe.add_argument("--mois", help="AAAA-MM : rapport mensuel")
+    s.add_argument("--envoyer", action="store_true", help="l'envoie aussi par email au directeur")
+    s.set_defaults(func=cmd_rapport_personnel)
+
+    s = sous.add_parser("test-email", help="envoie un email de test (réglages [directeur] et SMTP_...)")
+    s.add_argument("adresse")
+    s.set_defaults(func=cmd_test_email)
+
     s = sous.add_parser("paiement", help="enregistre un paiement d'abonnement")
     s.add_argument("zk_id", help="numéro de l'élève dans la pointeuse")
     s.add_argument("--mois", type=int, default=1)
@@ -271,8 +338,9 @@ def construire_parseur() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_web)
 
     s = sous.add_parser("simuler", help="ajoute des pointages dans la pointeuse simulée")
-    s.add_argument("--jours", type=int, help="génère un historique sur N jours ouvrés passés")
+    s.add_argument("--jours", type=int, help="génère un historique sur N jours de classe passés (lundi-samedi)")
     s.add_argument("--n", type=int, default=5, help="nombre d'élèves qui pointent maintenant")
+    s.add_argument("--profs", type=int, default=0, help="nombre de membres du personnel qui pointent maintenant")
     s.add_argument("--heure", help="HH:MM : faire pointer aujourd'hui à cette heure plutôt que maintenant")
     s.add_argument("--graine", type=int, help="pour obtenir toujours la même simulation")
     s.set_defaults(func=cmd_simuler)

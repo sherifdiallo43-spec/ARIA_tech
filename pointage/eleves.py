@@ -46,6 +46,8 @@ def inscrire(conn: sqlite3.Connection, zk_user_id: str, nom: str, prenom: str, c
     vides = [nom_champ for nom_champ, valeur in champs.items() if not valeur]
     if vides:
         raise ValueError(f"champ(s) vide(s) : {', '.join(vides)}")
+    if conn.execute("SELECT 1 FROM personnel WHERE zk_user_id = ?", (zk_user_id,)).fetchone():
+        raise ValueError(f"le numéro de pointeuse {zk_user_id} est déjà celui d'un membre du personnel")
     tel = normaliser_telephone(tel_parent)
 
     existe = conn.execute("SELECT id FROM eleves WHERE zk_user_id = ?", (zk_user_id,)).fetchone()
@@ -65,7 +67,7 @@ def inscrire(conn: sqlite3.Connection, zk_user_id: str, nom: str, prenom: str, c
     return "cree"
 
 
-def _lire_texte(chemin: Path) -> str:
+def lire_texte(chemin: Path) -> str:
     """Excel enregistre souvent en Windows-1252 et non en UTF-8 : on essaie les deux."""
     contenu = Path(chemin).read_bytes()
     try:
@@ -81,7 +83,7 @@ def importer_csv(conn: sqlite3.Connection, chemin: Path, aujourd_hui: date,
     Une ligne invalide n'arrête pas l'import : elle est signalée et on continue.
     Renvoie (nombre créés, nombre mis à jour, liste des erreurs).
     """
-    texte = _lire_texte(chemin)
+    texte = lire_texte(chemin)
     dialecte = csv.Sniffer().sniff(texte[:2048], delimiters=";,")
     lecteur = csv.DictReader(io.StringIO(texte), dialect=dialecte)
     manquantes = set(COLONNES) - set(lecteur.fieldnames or [])

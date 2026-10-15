@@ -114,12 +114,16 @@ Pour voir les messages, simule une heure proche de l'heure actuelle ou à venir.
 |---|---|
 | `pt init` | Crée la base de données |
 | `pt import-eleves fichier.csv` | Ajoute ou met à jour les élèves (réimporter ne redonne pas d'essai gratuit) |
+| `pt import-personnel fichier.csv` | Ajoute ou met à jour les profs et le personnel |
+| `pt import-emploi-du-temps fichier.csv` | Emploi du temps du personnel (une ligne par cours) |
+| `pt rapport-personnel [--jour J \| --mois M] [--envoyer]` | Rapport du personnel pour le directeur, et envoi par email |
+| `pt test-email ADRESSE` | Vérifie l'envoi des emails |
 | `pt paiement 12 --mois 3` | Enregistre un paiement de 3 mois pour l'élève n° 12 de la pointeuse |
 | `pt sync` | Une seule lecture de la pointeuse, plus l'envoi des messages en attente |
 | `pt run` | Le service en continu (c'est ce qui tourne à l'école) |
 | `pt test-whatsapp NUMERO` | Envoie un message WhatsApp de test pour vérifier le compte Twilio |
 | `pt web [--port N] [--reseau]` | Le tableau de bord web (mot de passe dans `.env`) |
-| `pt simuler --jours N` / `--n N [--heure HH:MM]` | Ajoute des pointages dans la fausse pointeuse |
+| `pt simuler --jours N` / `--n N [--profs N] [--heure HH:MM]` | Ajoute des pointages dans la fausse pointeuse |
 | `pt rapport [--jour AAAA-MM-JJ]` | Rapport PDF d'une journée (par défaut : aujourd'hui) |
 | `pt rapport --mois AAAA-MM` | Rapport PDF d'un mois |
 | `pt releve [--mois AAAA-MM]` | Relevé du prestataire : paiements, montant dû, parents à relancer (par défaut : le mois précédent) |
@@ -142,6 +146,69 @@ zk_user_id;nom;prenom;classe;tel_parent
   C'est le lien entre le boîtier et la base. `pt utilisateurs` affiche ces numéros.
 - `tel_parent` : accepté sous toutes les formes courantes (`77 123 45 67`, `00221...`, `+221...`).
   Il est converti au format international `+221771234567`.
+
+## Personnel et emploi du temps (facultatif)
+
+Pour les écoles qui veulent aussi suivre les profs. Sans personnel inscrit, rien ne change.
+
+**1. Le personnel** (`pt import-personnel`, voir `exemples/personnel_exemple.csv`) :
+
+```
+zk_user_id;nom;prenom;fonction
+900;Ndiaye;Mamadou;Prof de maths
+```
+
+Réserve une plage de numéros de pointeuse au personnel (900 et plus, par exemple). Un même
+numéro ne peut pas être à la fois un élève et un membre du personnel.
+
+**2. L'emploi du temps** (`pt import-emploi-du-temps`, voir `exemples/emploi_du_temps_exemple.csv`),
+une ligne par cours, du lundi au samedi :
+
+```
+zk_user_id;jour;debut;fin;classe;matiere
+900;lundi;08:00;10:00;3e A;Maths
+900;lundi;15:00;17:00;4e A;Maths
+```
+
+Réimporter remplace l'emploi du temps des personnes présentes dans le fichier (les autres
+gardent le leur). Une personne avec une ligne en erreur garde son ancien emploi du temps.
+
+**Ce que le logiciel en tire**
+
+- Pointages : arrivée, sortie, arrivée, sortie... autant que nécessaire.
+- Chaque cours est **à l'heure**, **en retard** (arrivée plus de `tolerance_retard_minutes`
+  après le début, 5 par défaut) ou **manqué** (personne absente pendant tout le cours).
+- Un jour sans cours n'est jamais compté comme absence.
+- Heures = temps de présence (arrivée → sortie). Une sortie oubliée n'est pas comptée.
+- Aucun message WhatsApp, aucun abonnement pour le personnel.
+
+## Rapport du personnel pour le directeur
+
+Le rapport du personnel est **confidentiel** : il est séparé du rapport des élèves, rangé dans
+`rapports/personnel/`, jamais affiché sur le tableau de bord, et envoyé **par email au directeur**
+(chaque jour après 18 h, et le 1er du mois pour le mois écoulé). Sans internet, l'envoi repart
+l'heure suivante, et un rapport n'est jamais envoyé deux fois.
+
+Dans `config.toml` :
+
+```toml
+[directeur]
+email = "directeur@ecole.sn"
+mode = "smtp"        # "console" pour les démos : l'email s'affiche sans partir
+```
+
+Dans `.env` (avec Gmail : active la validation en 2 étapes, puis crée un **mot de passe
+d'application** dans myaccount.google.com > Sécurité ; ce n'est pas le mot de passe du compte) :
+
+```
+SMTP_UTILISATEUR=aria.tech.rapports@gmail.com
+SMTP_MOT_DE_PASSE=xxxx xxxx xxxx xxxx
+```
+
+Puis vérifie : `pt test-email ton-adresse@gmail.com`.
+
+Les empreintes du personnel sont aussi des données biométriques : à inclure dans la
+déclaration à la CDP, avec le consentement écrit de chaque membre.
 
 ## Brancher la vraie pointeuse ZKTeco
 

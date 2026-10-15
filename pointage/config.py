@@ -23,6 +23,10 @@ CLES_SECRETES = (
     "TWILIO_SMS_FROM",
     "ZK_MOT_DE_PASSE",
     "DASHBOARD_PASSWORD",
+    "SMTP_HOTE",
+    "SMTP_PORT",
+    "SMTP_UTILISATEUR",
+    "SMTP_MOT_DE_PASSE",
 )
 
 
@@ -37,6 +41,8 @@ class Config:
     sauvegarde: dict
     chemins: dict
     rapports: dict = field(default_factory=dict)
+    personnel: dict = field(default_factory=dict)
+    directeur: dict = field(default_factory=dict)
     secrets: dict = field(default_factory=dict)
 
     @classmethod
@@ -51,6 +57,8 @@ class Config:
             sauvegarde=donnees["sauvegarde"],
             chemins=donnees["chemins"],
             rapports=donnees.get("rapports", {}),
+            personnel=donnees.get("personnel", {}),
+            directeur=donnees.get("directeur", {}),
             secrets=secrets or {},
         )
 

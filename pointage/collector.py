@@ -12,7 +12,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from . import notifier
+from . import notifier, personnel
 from .config import Config, lire_heure
 from .db import dt_texte, ecrire_etat, lire_etat
 from .device import Pointeuse, PointageBrut
@@ -81,6 +81,7 @@ def enregistrer(conn: sqlite3.Connection, bruts: list[PointageBrut], config: Con
     resultat = ResultatSync(lus=len(bruts))
     limite_archive = lire_etat(conn, "ignorer_avant")
     delai_rebond = timedelta(minutes=config.pointeuse.get("anti_doublon_minutes", 30))
+    tolerance = int(config.personnel.get("tolerance_retard_minutes", 5))
 
     # Ordre chronologique obligatoire : la détection des rebonds compare
     # chaque pointage à ceux qui le précèdent.
@@ -96,17 +97,22 @@ def enregistrer(conn: sqlite3.Connection, bruts: list[PointageBrut], config: Con
             resultat.rebonds += 1
             continue
 
-        type_, en_retard = classer(brut.horodatage,
-                                   _deja_pointe_ce_jour(conn, brut.zk_user_id, brut.horodatage),
-                                   config.horaires)
+        membre = personnel.trouver(conn, brut.zk_user_id)
+        if membre:
+            type_, en_retard = personnel.classer(conn, membre, brut.horodatage, tolerance)
+        else:
+            type_, en_retard = classer(brut.horodatage,
+                                       _deja_pointe_ce_jour(conn, brut.zk_user_id, brut.horodatage),
+                                       config.horaires)
         curseur = conn.execute(
             "INSERT INTO pointages (zk_user_id, horodatage, type, en_retard, recu_le) "
             "VALUES (?, ?, ?, ?, ?)",
             (brut.zk_user_id, horodatage, type_, int(en_retard), dt_texte(maintenant)),
         )
         resultat.nouveaux += 1
-        notifier.creer_notification(conn, curseur.lastrowid, brut.zk_user_id, brut.horodatage,
-                                    type_, en_retard, config, maintenant)
+        if not membre:  # aucun message pour le personnel
+            notifier.creer_notification(conn, curseur.lastrowid, brut.zk_user_id, brut.horodatage,
+                                        type_, en_retard, config, maintenant)
 
     ecrire_etat(conn, "derniere_sync", dt_texte(maintenant))
     conn.commit()

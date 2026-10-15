@@ -47,6 +47,8 @@ def archiver_annee(conn: sqlite3.Connection, config: Config, libelle: str, date_
 
     selections = {
         "eleves": ("SELECT * FROM main.eleves", ()),
+        "personnel": ("SELECT * FROM main.personnel", ()),
+        "creneaux": ("SELECT * FROM main.creneaux", ()),
         "pointages": ("SELECT * FROM main.pointages WHERE horodatage < ?", (limite,)),
         "notifications": ("SELECT * FROM main.notifications WHERE pointage_id IN "
                           "(SELECT id FROM main.pointages WHERE horodatage < ?)", (limite,)),

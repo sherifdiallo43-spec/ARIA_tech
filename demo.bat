@@ -4,16 +4,16 @@ cd /d C:\Users\DELL\Documents\pointage-scolaire
 echo === ARIA_point - Preparation de la demo ===
 echo.
 
-rem Securite : la demo ne doit jamais envoyer de vrais messages a des parents.
-.venv\Scripts\python -c "import sys; from pointage.config import charger; sys.exit(charger().notifications['mode'] != 'console')"
+rem Securite : la demo ne doit jamais envoyer de vrais messages ni de vrais emails.
+.venv\Scripts\python -c "import sys; from pointage.config import charger; c = charger(); sys.exit(c.notifications['mode'] != 'console' or c.directeur.get('mode', 'console') != 'console')"
 if errorlevel 1 (
-    echo ARRET : notifications pas en mode "console" dans config.toml.
+    echo ARRET : [notifications] ou [directeur] pas en mode "console" dans config.toml.
     echo La demo enverrait de vrais messages. Remets mode = "console" puis relance.
     goto fin
 )
 
 echo [1/3] Simulation des pointages...
-.venv\Scripts\python main.py simuler --n 9
+.venv\Scripts\python main.py simuler --n 9 --profs 4
 if errorlevel 1 goto erreur
 echo.
 

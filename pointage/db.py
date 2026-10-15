@@ -28,6 +28,30 @@ CREATE TABLE IF NOT EXISTS eleves (
     actif_scolarite  INTEGER NOT NULL DEFAULT 1 -- 0 = a quitté l'école
 );
 
+-- Personnel (professeurs, surveillants...) qui pointe sur le même boîtier.
+-- Pas de parents à prévenir ni d'abonnement : seulement présence, retards, heures.
+CREATE TABLE IF NOT EXISTS personnel (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    zk_user_id       TEXT    NOT NULL UNIQUE,
+    nom              TEXT    NOT NULL,
+    prenom           TEXT    NOT NULL,
+    fonction         TEXT    NOT NULL,
+    date_inscription TEXT    NOT NULL,
+    actif            INTEGER NOT NULL DEFAULT 1
+);
+
+-- Emploi du temps du personnel : une ligne par cours de la semaine.
+-- Un jour sans créneau = la personne n'est pas attendue ce jour-là.
+CREATE TABLE IF NOT EXISTS creneaux (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    zk_user_id TEXT    NOT NULL REFERENCES personnel(zk_user_id),
+    jour       TEXT    NOT NULL,   -- lundi ... samedi
+    debut      TEXT    NOT NULL,   -- "08:00"
+    fin        TEXT    NOT NULL,
+    classe     TEXT    NOT NULL DEFAULT '',
+    matiere    TEXT    NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS paiements (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     eleve_id      INTEGER NOT NULL REFERENCES eleves(id),

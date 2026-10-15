@@ -28,6 +28,19 @@ retard_apres = "08:00"         # arrivée après cette heure = retard
 sortie_seule_apres = "16:00"   # un PREMIER pointage après cette heure est une sortie
                                # (l'élève a oublié de pointer en arrivant)
 
+# Professeurs et autres adultes qui pointent (commandes import-personnel et
+# import-emploi-du-temps). Sans personnel inscrit, rien ne change pour l'école.
+[personnel]
+tolerance_retard_minutes = 5   # arrivée plus de 5 min après le début du cours = retard
+
+# Le rapport du personnel (jour et mois) est confidentiel : il est envoyé par
+# email au directeur seul, jamais affiché sur le tableau de bord.
+[directeur]
+email = ""          # adresse du directeur
+# "console" : l'email s'affiche à l'écran (tests, démos)
+# "smtp"    : envoi réel (identifiants SMTP_... dans .env)
+mode = "console"
+
 [abonnement]
 prix_mensuel = 1000   # FCFA
 essai_jours = 30      # durée de l'essai gratuit à l'inscription

@@ -186,7 +186,8 @@ def generer_journee(zk_ids: list[str], jour: date, rng: random.Random) -> list[P
             arrivee = _vers(jour, 8, rng.uniform(1, 40))            # en retard
         else:
             arrivee = _vers(jour, 7, rng.uniform(20, 59))
-        sortie = _vers(jour, 17, rng.uniform(0, 25))
+        # Le samedi, les cours s'arrêtent à midi.
+        sortie = _vers(jour, 12 if jour.weekday() == 5 else 17, rng.uniform(0, 25))
         tirage = rng.random()
         if tirage < 0.04:
             moments = [arrivee]          # a oublié de pointer en sortant
@@ -199,4 +200,34 @@ def generer_journee(zk_ids: list[str], jour: date, rng: random.Random) -> list[P
             pointages.append(PointageBrut(zk_id, moment))
             if rng.random() < 0.03:  # l'élève repose son doigt 30 s plus tard
                 pointages.append(PointageBrut(zk_id, moment + timedelta(seconds=30)))
+    return pointages
+
+
+def _heure_du_jour(jour: date, texte: str, decalage_minutes: float) -> datetime:
+    heures, minutes = (int(x) for x in texte.split(":"))
+    return _vers(jour, heures, minutes + decalage_minutes)
+
+
+def generer_journee_personnel(emplois: list[tuple[str, list[dict]]], jour: date,
+                              rng: random.Random) -> list[PointageBrut]:
+    """Journée du personnel d'après l'emploi du temps. `emplois` : (zk_id, cours du jour).
+    ~5 % d'absents, ~15 % de retards au premier cours, sortie puis retour quand deux
+    cours sont séparés d'au moins 2 h, quelques sorties oubliées."""
+    pointages: list[PointageBrut] = []
+    for zk_id, cours in emplois:
+        if rng.random() < 0.05:
+            continue
+        en_retard = rng.random() < 0.15
+        moments = [_heure_du_jour(jour, cours[0]["debut"],
+                                  rng.uniform(8, 30) if en_retard else -rng.uniform(2, 20))]
+        for precedent, suivant in zip(cours, cours[1:]):
+            trou = (_heure_du_jour(jour, suivant["debut"], 0)
+                    - _heure_du_jour(jour, precedent["fin"], 0)).total_seconds() / 60
+            if trou >= 120:
+                moments.append(_heure_du_jour(jour, precedent["fin"], rng.uniform(0, 10)))
+                moments.append(_heure_du_jour(jour, suivant["debut"], -rng.uniform(2, 15)))
+        moments.append(_heure_du_jour(jour, cours[-1]["fin"], rng.uniform(0, 15)))
+        if rng.random() < 0.04:
+            moments = moments[:-1]  # a oublié de pointer en partant
+        pointages += [PointageBrut(zk_id, m.replace(microsecond=0)) for m in moments]
     return pointages
