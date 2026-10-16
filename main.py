@@ -9,7 +9,7 @@ from datetime import date, datetime, timedelta
 from logging.handlers import RotatingFileHandler
 
 from pointage import (archive, backup, collector, courriel, db, eleves, notifier, personnel, purge,
-                      reports, service)
+                      reports, service, verification)
 from pointage.config import Config, charger
 from pointage.device import (PointeuseSimulee, PointageBrut, creer_pointeuse, generer_journee,
                              generer_journee_personnel)
@@ -282,6 +282,34 @@ def cmd_utilisateurs(config, args):
         print(f"{zk_id:>6}  {nom}")
 
 
+def cmd_verifier_numeros(config, args):
+    """Compare les numéros enregistrés sur le boîtier avec ceux de la base."""
+    try:
+        utilisateurs = creer_pointeuse(config).lister_utilisateurs()
+    except Exception as e:
+        sys.exit(f"Pointeuse injoignable ({type(e).__name__} : {e}).")
+    ecarts = verification.comparer(ouvrir_base(config), utilisateurs)
+    print(f"{ecarts.ok} numéro(s) en règle (présents sur le boîtier ET dans la base).")
+
+    if ecarts.numeros_en_double:
+        print("\nDANGER : même numéro pour un élève ET un membre du personnel :")
+        print("  " + ", ".join(ecarts.numeros_en_double))
+    if ecarts.inconnus_sur_boitier:
+        print("\nSur le boîtier mais ABSENTS de la base (faute de frappe ? CSV pas importé ?) :")
+        for zk_id, nom in ecarts.inconnus_sur_boitier:
+            print(f"  {zk_id:>6}  {nom}")
+    if ecarts.eleves_sans_doigt:
+        print(f"\nÉlèves dans la base sans empreinte sur le boîtier ({len(ecarts.eleves_sans_doigt)}) :")
+        for e in ecarts.eleves_sans_doigt:
+            print(f"  {e['zk_user_id']:>6}  {e['classe']:<8} {e['prenom']} {e['nom']}")
+    if ecarts.personnel_sans_doigt:
+        print(f"\nPersonnel dans la base sans empreinte sur le boîtier ({len(ecarts.personnel_sans_doigt)}) :")
+        for p in ecarts.personnel_sans_doigt:
+            print(f"  {p['zk_user_id']:>6}  {p['prenom']} {p['nom']}")
+    if ecarts.propre:
+        print("\nTout est cohérent.")
+
+
 # --- Analyse de la ligne de commande -------------------------------------------
 
 def construire_parseur() -> argparse.ArgumentParser:
@@ -369,6 +397,9 @@ def construire_parseur() -> argparse.ArgumentParser:
 
     sous.add_parser("statut", help="résumé de l'état du système").set_defaults(func=cmd_statut)
     sous.add_parser("utilisateurs", help="liste les utilisateurs de la pointeuse").set_defaults(func=cmd_utilisateurs)
+    sous.add_parser("verifier-numeros",
+                    help="compare les numéros du boîtier avec la base (doigts manquants, fautes de frappe)"
+                    ).set_defaults(func=cmd_verifier_numeros)
     return p
 
 

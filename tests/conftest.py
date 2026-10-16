@@ -16,8 +16,11 @@ INSCRIPTION = date(2026, 10, 1)  # essai gratuit jusqu'au 31/10/2026
 @pytest.fixture
 def config(tmp_path):
     donnees = lire_toml(RACINE_PROJET / "config.toml")
+    donnees["ecole"]["nom"] = "Groupe Scolaire Exemple"
     donnees["pointeuse"]["mode"] = "simulee"
     donnees["notifications"]["mode"] = "console"
+    donnees["directeur"] = donnees.get("directeur", {"email": "", "mode": "console"})
+    donnees["directeur"]["mode"] = "console"
     return Config.depuis_dict(tmp_path, donnees)
 
 

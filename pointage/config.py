@@ -43,6 +43,7 @@ class Config:
     rapports: dict = field(default_factory=dict)
     personnel: dict = field(default_factory=dict)
     directeur: dict = field(default_factory=dict)
+    pointeuses: list[dict] = field(default_factory=list)
     secrets: dict = field(default_factory=dict)
 
     @classmethod
@@ -59,6 +60,7 @@ class Config:
             rapports=donnees.get("rapports", {}),
             personnel=donnees.get("personnel", {}),
             directeur=donnees.get("directeur", {}),
+            pointeuses=donnees.get("pointeuses", []),
             secrets=secrets or {},
         )
 

@@ -102,6 +102,65 @@ class ZKPointeuse:
         return len(bruts)
 
 
+class MultiPointeuse:
+    """Regroupe plusieurs pointeuses physiques en une seule interface.
+
+    Lit chaque boîtier l'un après l'autre et fusionne les résultats.
+    Si un boîtier est injoignable, les autres sont quand même lus.
+    """
+
+    def __init__(self, pointeuses: list[ZKPointeuse]):
+        self.pointeuses = pointeuses
+
+    def lire_pointages(self) -> list[PointageBrut]:
+        tous = []
+        for p in self.pointeuses:
+            try:
+                tous.extend(p.lire_pointages())
+            except Exception as e:
+                log.warning("Pointeuse %s injoignable (%s), passage à la suivante.", p.ip, e)
+        return tous
+
+    def synchroniser_heure(self) -> None:
+        for p in self.pointeuses:
+            try:
+                p.synchroniser_heure()
+            except Exception as e:
+                log.warning("Mise à l'heure impossible pour %s (%s).", p.ip, e)
+
+    def lister_utilisateurs(self) -> list[tuple[str, str]]:
+        tous = []
+        vus = set()
+        for p in self.pointeuses:
+            try:
+                for zk_id, nom in p.lister_utilisateurs():
+                    if zk_id not in vus:
+                        tous.append((zk_id, nom))
+                        vus.add(zk_id)
+            except Exception as e:
+                log.warning("Pointeuse %s injoignable (%s).", p.ip, e)
+        return tous
+
+    def lire_puis_effacer(self, traiter: Callable[[list[PointageBrut]], None]) -> int:
+        tous = []
+        connectees = []
+        for p in self.pointeuses:
+            try:
+                tous.extend(p.lire_pointages())
+                connectees.append(p)
+            except Exception as e:
+                log.warning("Pointeuse %s injoignable (%s). Ses pointages ne seront pas effacés.", p.ip, e)
+        traiter(tous)
+        for p in connectees:
+            try:
+                with p._connexion() as conn:
+                    conn.clear_attendance()
+                log.info("Mémoire de %s vidée.", p.ip)
+            except Exception as e:
+                log.warning("Vidage impossible pour %s (%s).", p.ip, e)
+        return len(tous)
+
+
 class PointeuseSimulee:
     """Imite la mémoire flash d'une pointeuse : une liste de pointages qui grossit.
 
@@ -153,19 +212,29 @@ class PointeuseSimulee:
         return len(bruts)
 
 
+def _creer_zk(reglages: dict, secrets: dict) -> ZKPointeuse:
+    return ZKPointeuse(
+        ip=reglages["ip"],
+        port=int(reglages.get("port", 4370)),
+        timeout=int(reglages.get("timeout", 5)),
+        mot_de_passe=int(secrets.get("ZK_MOT_DE_PASSE") or 0),
+        forcer_udp=bool(reglages.get("forcer_udp", False)),
+    )
+
+
 def creer_pointeuse(config) -> Pointeuse:
-    """Choisit la vraie pointeuse ou le simulateur selon config.toml."""
+    """Choisit la vraie pointeuse ou le simulateur selon config.toml.
+
+    Supporte une seule pointeuse ([pointeuse]) ou plusieurs ([[pointeuses]]).
+    """
     reglages = config.pointeuse
     if reglages["mode"] == "simulee":
         return PointeuseSimulee(config.chemin("pointeuse_simulee"))
     if reglages["mode"] == "zk":
-        return ZKPointeuse(
-            ip=reglages["ip"],
-            port=int(reglages.get("port", 4370)),
-            timeout=int(reglages.get("timeout", 5)),
-            mot_de_passe=int(config.secrets.get("ZK_MOT_DE_PASSE") or 0),
-            forcer_udp=bool(reglages.get("forcer_udp", False)),
-        )
+        liste = getattr(config, "pointeuses", None)
+        if liste and len(liste) > 1:
+            return MultiPointeuse([_creer_zk(p, config.secrets) for p in liste])
+        return _creer_zk(reglages, config.secrets)
     raise ValueError(f"Mode de pointeuse inconnu : {reglages['mode']!r} (attendu : 'zk' ou 'simulee')")
 
 

@@ -13,6 +13,13 @@ port = 4370
 timeout = 5
 forcer_udp = false               # à passer à true pour certains vieux modèles
 intervalle_sync_secondes = 30    # fréquence de lecture de la pointeuse
+# Pour plusieurs pointeuses, ajoute des blocs [[pointeuses]] au lieu de ip/port ci-dessus :
+# [[pointeuses]]
+# ip = "192.168.1.201"
+# nom = "Entrée principale"
+# [[pointeuses]]
+# ip = "192.168.1.202"
+# nom = "Entrée secondaire"
 anti_doublon_minutes = 30        # deux pointages du même élève à moins de 30 min = un seul
 # Vidage automatique de la mémoire du boîtier, une fois tout mis en sécurité.
 # Il se déclenche quand la mémoire dépasse ce nombre de pointages (0 = jamais),
