@@ -142,22 +142,56 @@ class MultiPointeuse:
         return tous
 
     def lire_puis_effacer(self, traiter: Callable[[list[PointageBrut]], None]) -> int:
-        tous = []
-        connectees = []
-        for p in self.pointeuses:
+        """Comme ZKPointeuse.lire_puis_effacer, mais pour plusieurs boîtiers à la fois.
+
+        Chaque boîtier joignable est bloqué (disable_device) AVANT la lecture et
+        reste bloqué jusqu'à ce que `traiter` ait traité l'ensemble fusionné des
+        pointages : sinon, un élève pourrait pointer sur un boîtier entre la
+        lecture et l'effacement, et ce pointage serait perdu sans avoir été
+        enregistré. Le boîtier n'est effacé que si `traiter` n'a pas levé
+        d'exception, mais il est toujours débloqué, même en cas d'erreur.
+        """
+        from contextlib import ExitStack
+
+        tous: list[PointageBrut] = []
+        bloquees: list[tuple[ZKPointeuse, object]] = []  # (pointeuse, connexion) bloquées et lues
+        with ExitStack() as pile:
+            for p in self.pointeuses:
+                try:
+                    conn = pile.enter_context(p._connexion())
+                    conn.disable_device()
+                except Exception as e:
+                    log.warning("Pointeuse %s injoignable (%s), passage à la suivante.", p.ip, e)
+                    continue
+                try:
+                    bruts = [PointageBrut(str(a.user_id), a.timestamp.replace(microsecond=0))
+                            for a in conn.get_attendance()]
+                except Exception as e:
+                    # Bloquée mais pas lue : on la débloque avant de l'abandonner,
+                    # sinon elle resterait bloquée jusqu'au prochain redémarrage.
+                    log.warning("Lecture de %s impossible (%s), passage à la suivante.", p.ip, e)
+                    try:
+                        conn.enable_device()
+                    except Exception as e2:
+                        log.warning("Déblocage impossible pour %s (%s).", p.ip, e2)
+                    continue
+                tous.extend(bruts)
+                bloquees.append((p, conn))
+
             try:
-                tous.extend(p.lire_pointages())
-                connectees.append(p)
-            except Exception as e:
-                log.warning("Pointeuse %s injoignable (%s). Ses pointages ne seront pas effacés.", p.ip, e)
-        traiter(tous)
-        for p in connectees:
-            try:
-                with p._connexion() as conn:
-                    conn.clear_attendance()
-                log.info("Mémoire de %s vidée.", p.ip)
-            except Exception as e:
-                log.warning("Vidage impossible pour %s (%s).", p.ip, e)
+                traiter(tous)
+                for p, conn in bloquees:
+                    try:
+                        conn.clear_attendance()
+                        log.info("Mémoire de %s vidée.", p.ip)
+                    except Exception as e:
+                        log.warning("Vidage impossible pour %s (%s).", p.ip, e)
+            finally:
+                for p, conn in bloquees:
+                    try:
+                        conn.enable_device()
+                    except Exception as e:
+                        log.warning("Déblocage impossible pour %s (%s).", p.ip, e)
         return len(tous)
 
 
