@@ -431,21 +431,8 @@ def _tableau_notifications(pdf, notifications: dict[str, int]) -> None:
              (120, 60))
 
 
-def _pluriel(n: int, mot: str) -> str:
-    return f"{n} {mot}{'s' if n > 1 else ''}"
-
-
-def _bilan_classe(c: dict) -> str:
-    morceaux = [_pluriel(c["presents"], "présent"), _pluriel(c["absents"], "absent"),
-                _pluriel(c["retards"], "retard")]
-    if c["incomplets"]:
-        morceaux.append(f"{c['incomplets']} pointage{'s' if c['incomplets'] > 1 else ''} "
-                        f"incomplet{'s' if c['incomplets'] > 1 else ''}")
-    return " · ".join(morceaux) + "."
-
-
 def _ligne_eleve(eleve: dict) -> list:
-    """Une ligne du tableau d'une classe : Élève, Statut, Arrivée, Sortie."""
+    """Élève, Statut, Arrivée, Sortie (statut et heures manquantes en couleur)."""
     non_pointee = ("non pointée", _style(ORANGE, gras=False, italique=True))
     if eleve["statut"] == "absent":
         return [eleve["nom"], ("Absent(e)", _style(ROUGE)), "-", "-"]
@@ -471,12 +458,23 @@ def generer_pdf_jour(stats: StatsJour, nom_ecole: str, chemin: Path,
     ], (120, 60))
     pdf.ln(4)
 
-    for c in stats.par_classe:
-        _titre(pdf, f"Classe de {c['classe']} · {date_txt}")
-        _tableau(pdf, ["Élève", "Statut", "Arrivée", "Sortie"],
-                 [_ligne_eleve(e) for e in c["eleves"]], (70, 40, 35, 35))
-        _texte(pdf, _bilan_classe(c), gras="Bilan de la classe :")
-        pdf.ln(3)
+    # Même organisation que le rapport mensuel : une ligne par classe, puis
+    # seulement les élèves qui demandent une action (pas la liste de toute l'école).
+    _titre(pdf, "Présence par classe")
+    _tableau_ou_rien(pdf, ["Classe", "Effectif", "Présents", "Absents", "Retards"],
+                     [[c["classe"], c["effectif"],
+                       (str(c["presents"]), _style(VERT)),
+                       (str(c["absents"]), _style(ROUGE)) if c["absents"] else "0",
+                       (str(c["retards"]), _style(ORANGE)) if c["retards"] else "0"]
+                      for c in stats.par_classe], (50, 32, 33, 33, 32), "Aucun élève inscrit.")
+
+    _titre(pdf, "Élèves à suivre aujourd'hui")
+    a_suivre = [(c["classe"], e) for c in stats.par_classe for e in c["eleves"]
+                if e["statut"] != "present" or not (e["arrivee"] and e["sortie"])]
+    _tableau_ou_rien(pdf, ["Élève", "Classe", "Statut", "Arrivée", "Sortie"],
+                     [[ligne[0], classe, *ligne[1:]]
+                      for classe, ligne in ((cl, _ligne_eleve(e)) for cl, e in a_suivre)],
+                     (65, 30, 30, 27, 28), "Aucune absence, aucun retard, aucun oubli aujourd'hui.")
 
     _titre(pdf, "Absents du jour : parents à contacter")
     _tableau_ou_rien(pdf, ["Élève", "Classe", "Téléphone du parent"],
