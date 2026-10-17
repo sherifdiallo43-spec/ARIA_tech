@@ -175,7 +175,13 @@ def cmd_releve(config, args):
 
 
 def cmd_sauvegarder(config, args):
-    print(f"Sauvegarde créée : {backup.sauvegarder(ouvrir_base(config), config)}")
+    conn = ouvrir_base(config)
+    print(f"Sauvegarde créée : {backup.sauvegarder(conn, config)}")
+    if config.sauvegarde.get("copie_externe"):
+        copie = backup.copier_vers_externe(conn, config)
+        print(f"Copie externe    : {copie}" if copie else
+              f"Copie externe    : IMPOSSIBLE, dossier « {config.sauvegarde['copie_externe']} » "
+              "introuvable. La clé USB est-elle branchée ?")
 
 
 def cmd_archiver(config, args):
@@ -226,6 +232,13 @@ def cmd_statut(config, args):
     print(f"Messages en attente : {attente}")
     print(f"Dernière lecture    : {db.lire_etat(conn, 'derniere_sync', 'jamais')}")
     print(f"Dernière sauvegarde : {db.lire_etat(conn, 'derniere_sauvegarde', 'jamais')}")
+    if config.sauvegarde.get("copie_externe"):
+        print(f"Copie sur clé USB   : {db.lire_etat(conn, 'derniere_copie_externe', 'jamais')}")
+        alerte = backup.alerte_copie_externe(conn, config)
+        if alerte:
+            print(f"  ATTENTION : {alerte}")
+    else:
+        print("Copie sur clé USB   : NON RÉGLÉE (copie_externe dans [sauvegarde] de config.toml)")
     print(f"Mémoire pointeuse   : {db.lire_etat(conn, 'memoire_pointeuse', '?')} pointage(s) "
           f"(vidage auto au-delà de {config.pointeuse.get('vider_au_dela', 0)}, "
           f"dernier vidage : {db.lire_etat(conn, 'dernier_vidage', 'jamais')})")

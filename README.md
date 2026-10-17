@@ -61,7 +61,11 @@ en-têtes de sécurité, aucune donnée ni secret envoyé sur GitHub), mais l'in
    `ZK_MOT_DE_PASSE`) et, si possible, la brancher sur un réseau séparé du Wi-Fi des visiteurs.
    Son protocole n'est pas chiffré.
 5. **Ne jamais copier `.env`** ailleurs que sur ce PC, et ne pas partager le dossier `data/`.
-6. **Informer les parents** que le nom de l'enfant transite par Twilio et WhatsApp (serveurs
+   Dans une école, utiliser une clé d'API Twilio propre à l'école, jamais le jeton principal
+   (voir « Brancher WhatsApp »).
+6. **Clé USB de sauvegarde chiffrée** (voir « Sauvegardes sur clé USB ») : elle contient les
+   noms et les téléphones des parents. Perdue sans chiffrement, ce serait une fuite de données.
+7. **Informer les parents** que le nom de l'enfant transite par Twilio et WhatsApp (serveurs
    à l'étranger) quand les alertes sont activées, et le mentionner dans la déclaration à la CDP.
 
 ## Installation (Windows)
@@ -267,6 +271,32 @@ Planificateur de tâches Windows → Créer une tâche :
 - Paramètres : « Si la tâche échoue, redémarrer toutes les 1 minute »
 
 Le journal de fonctionnement est dans `logs/pointage.log`.
+
+## Sauvegardes sur clé USB
+
+Le service sauvegarde la base chaque jour dans `backups/`, **sur le même disque** que la base.
+Si ce disque tombe en panne ou si le PC est volé, ces sauvegardes disparaissent avec lui.
+D'où une copie quotidienne sur une clé USB (ou un disque externe) :
+
+1. Sur la clé, crée un dossier `ARIA_point_sauvegardes` à la racine.
+2. **Chiffre la clé** avec BitLocker To Go (clic droit sur la clé dans l'Explorateur >
+   Activer BitLocker ; Windows Pro). Coche « Déverrouiller automatiquement sur ce PC »
+   pour que le service puisse y écrire. Note le mot de passe de la clé dans un lieu sûr.
+3. Dans `config.toml`, section `[sauvegarde]` : `copie_externe = "ARIA_point_sauvegardes"`.
+4. Laisse la clé branchée. `pt sauvegarder` fait une copie tout de suite pour vérifier.
+
+Chaque heure, si la dernière copie a plus de 24 h et que la clé est branchée, le service y
+copie la dernière sauvegarde, la vérifie (une copie abîmée est supprimée), et garde
+`retention_jours` jours d'historique. La lettre de la clé (E:, F:...) peut changer, le
+logiciel cherche le dossier sur tous les lecteurs. Sans copie depuis 3 jours, un message
+s'affiche sur le tableau de bord et dans `pt statut`.
+
+**Restaurer après une panne** (nouveau PC, logiciel installé) : arrête le service, copie le
+fichier `pointage_AAAA-MM-JJ_HHMMSS.db` le plus récent de la clé vers `data\pointage.db`
+(supprime `data\pointage.db-wal` et `data\pointage.db-shm` s'ils existent), puis relance le
+service. Les pointages encore dans la mémoire de la pointeuse depuis cette date sont
+récupérés automatiquement à la lecture suivante, sauf si la mémoire a été vidée entre-temps
+(les vidages gardent une copie brute dans `backups/memoire_pointeuse_*.json`).
 
 ## Fin d'année scolaire
 

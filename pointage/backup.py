@@ -8,7 +8,10 @@ pourrait capturer une base à moitié écrite.
 from __future__ import annotations
 
 import logging
+import os
+import shutil
 import sqlite3
+import string
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -68,3 +71,115 @@ def sauvegarder_si_besoin(conn: sqlite3.Connection, config: Config,
     if derniere and maintenant - texte_dt(derniere) < timedelta(hours=24):
         return None
     return sauvegarder(conn, config, maintenant)
+
+
+# --- Copie sur un support externe (clé USB, disque externe) ------------------------
+#
+# Les sauvegardes ci-dessus sont sur le même disque que la base : si ce disque
+# meurt ou si le PC est volé, tout est perdu d'un coup. On copie donc chaque jour
+# la dernière sauvegarde sur un support qui peut être rangé ailleurs.
+#
+# Sous Windows, la lettre d'une clé USB change (E:, F:...) selon l'ordre de
+# branchement. On ne la fixe donc pas : on cherche, à la racine de chaque lecteur
+# de D: à Z:, un dossier au nom convenu (créé une fois pour toutes sur la clé).
+
+ALERTE_JOURS = 3  # au-delà, le tableau de bord et `statut` signalent l'absence de copie
+
+
+def _lecteurs() -> list[Path]:
+    """Racines des lecteurs D: à Z: présents (C: est le disque du PC lui-même)."""
+    if os.name != "nt":
+        return []
+    return [Path(f"{lettre}:\\") for lettre in string.ascii_uppercase[3:]
+            if os.path.exists(f"{lettre}:\\")]
+
+
+def trouver_dossier_externe(config: Config, racines: list[Path] | None = None) -> Path | None:
+    """Dossier de copie externe s'il est branché, sinon None.
+
+    Réglage `copie_externe` de [sauvegarde] : un chemin complet ("E:/sauvegardes"),
+    ou seulement un nom de dossier ("ARIA_point_sauvegardes") à chercher sur les lecteurs.
+    """
+    reglage = config.sauvegarde.get("copie_externe", "")
+    if not reglage:
+        return None
+    chemin = Path(reglage)
+    if chemin.is_absolute():
+        return chemin if chemin.is_dir() else None
+    for racine in (racines if racines is not None else _lecteurs()):
+        if (racine / reglage).is_dir():
+            return racine / reglage
+    return None
+
+
+def _derniere_sauvegarde_locale(config: Config) -> Path | None:
+    fichiers = sorted(config.chemin("sauvegardes").glob(f"{PREFIXE}*.db"))
+    return fichiers[-1] if fichiers else None
+
+
+def copier_vers_externe(conn: sqlite3.Connection, config: Config, maintenant: datetime | None = None,
+                        racines: list[Path] | None = None) -> Path | None:
+    """Copie la dernière sauvegarde sur le support externe. None si le support est absent.
+
+    La copie est d'abord écrite sous un nom temporaire puis vérifiée (SQLite relit
+    tout le fichier) : une clé arrachée en pleine copie ne laisse jamais un fichier
+    abîmé qui passerait pour une bonne sauvegarde.
+    """
+    maintenant = maintenant or datetime.now()
+    dossier = trouver_dossier_externe(config, racines)
+    if dossier is None:
+        return None
+    source = _derniere_sauvegarde_locale(config) or sauvegarder(conn, config, maintenant)
+    cible = dossier / source.name
+    temporaire = dossier / (source.name + ".tmp")
+    try:
+        shutil.copyfile(source, temporaire)
+        verif = sqlite3.connect(temporaire)
+        try:
+            resultat = verif.execute("PRAGMA quick_check").fetchone()[0]
+        finally:
+            verif.close()
+        if resultat != "ok":
+            raise RuntimeError(f"Copie externe abîmée ({resultat}).")
+    except Exception:
+        # Copie interrompue ou illisible : on ne laisse rien qui passerait pour une sauvegarde.
+        temporaire.unlink(missing_ok=True)
+        raise
+    temporaire.replace(cible)
+
+    ecrire_etat(conn, "derniere_copie_externe", dt_texte(maintenant))
+    conn.commit()
+    nettoyer_anciennes(dossier, config.sauvegarde["retention_jours"], maintenant)
+    log.info("Copie externe créée : %s", cible)
+    return cible
+
+
+def copier_externe_si_besoin(conn: sqlite3.Connection, config: Config, maintenant: datetime | None = None,
+                             racines: list[Path] | None = None) -> Path | None:
+    """Copie externe si la dernière a plus de 24 h et que le support est branché."""
+    maintenant = maintenant or datetime.now()
+    if not config.sauvegarde.get("copie_externe"):
+        return None
+    derniere = lire_etat(conn, "derniere_copie_externe")
+    if derniere and maintenant - texte_dt(derniere) < timedelta(hours=24):
+        return None
+    copie = copier_vers_externe(conn, config, maintenant, racines)
+    if copie is None:
+        log.warning("Copie externe impossible : support « %s » introuvable. Branche la clé USB.",
+                    config.sauvegarde["copie_externe"])
+    return copie
+
+
+def alerte_copie_externe(conn: sqlite3.Connection, config: Config,
+                         maintenant: datetime | None = None) -> str | None:
+    """Message d'alerte si la copie externe est en retard, sinon None (ou si elle n'est pas réglée)."""
+    maintenant = maintenant or datetime.now()
+    if not config.sauvegarde.get("copie_externe"):
+        return None
+    derniere = lire_etat(conn, "derniere_copie_externe")
+    if not derniere:
+        return "Aucune sauvegarde n'a encore été copiée sur la clé USB. Branche-la sur ce PC."
+    jours = (maintenant - texte_dt(derniere)).days
+    if jours >= ALERTE_JOURS:
+        return f"Aucune sauvegarde copiée sur la clé USB depuis {jours} jours. Branche-la sur ce PC."
+    return None

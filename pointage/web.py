@@ -20,7 +20,7 @@ from pathlib import Path
 from flask import (Flask, abort, flash, g, redirect, render_template, request,
                    send_from_directory, session, url_for)
 
-from . import db, reports
+from . import backup, db, reports
 from .config import Config
 
 # Dossiers de rapports que la page peut afficher et servir (jamais "prestataire").
@@ -118,7 +118,10 @@ def create_app(config: Config, mot_de_passe: str, horloge=time.time) -> Flask:
             session.clear()
             flash("Session expirée après 30 minutes sans activité. Reconnecte-toi.")
             return redirect(url_for("connexion"))
-        session["vu"] = horloge()
+        # L'actualisation automatique de la page (toutes les 30 s) n'est pas une
+        # activité humaine : sinon une page laissée ouverte ne se fermerait jamais.
+        if not request.args.get("auto"):
+            session["vu"] = horloge()
         return None
 
     # --- Connexion ---------------------------------------------------------------
@@ -175,7 +178,7 @@ def create_app(config: Config, mot_de_passe: str, horloge=time.time) -> Flask:
             veille=(jour - timedelta(days=1)).isoformat(),
             lendemain=(jour + timedelta(days=1)).isoformat() if jour < date.today() else None,
             derniere_lecture=derniere[11:16].replace(":", "h") if derniere else None,
-            en_ligne=en_ligne)
+            en_ligne=en_ligne, alerte_sauvegarde=backup.alerte_copie_externe(conn(), config))
 
     # --- Rapports ------------------------------------------------------------------
 

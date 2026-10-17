@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block titre %}Aujourd'hui{% endblock %}
-{% block entete %}{% if est_aujourdhui %}<meta http-equiv="refresh" content="30">{% endif %}{% endblock %}
+{% block entete %}{% if est_aujourdhui %}<meta http-equiv="refresh" content="30;url={{ url_for('aujourdhui', auto=1) }}">{% endif %}{% endblock %}
 {% block contenu %}
 <h1>{{ jour_texte }}</h1>
 <p class="sous-titre">
@@ -10,6 +10,7 @@
   {% else %}Aucune lecture de la pointeuse pour l'instant{% endif %}
   {% if est_aujourdhui %} · actualisation automatique{% endif %}
 </p>
+{% if alerte_sauvegarde %}<div class="message">{{ alerte_sauvegarde }}</div>{% endif %}
 
 <div class="jours">
   <a class="bouton discret" href="{{ url_for('aujourdhui', jour=veille) }}">← Veille</a>

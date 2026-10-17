@@ -112,3 +112,21 @@ def test_deconnexion_apres_30_minutes_sans_activite(config, conn, trois_eleves):
     reponse = client.get("/")
     assert reponse.status_code == 302 and "/connexion" in reponse.headers["Location"]
     assert client.get("/rapports").status_code == 302  # la session a bien été effacée
+
+
+def test_actualisation_automatique_ne_garde_pas_la_session_ouverte(config, conn, trois_eleves):
+    from pointage import web
+
+    maintenant = [1_000_000.0]
+    client = create_app(config, MOT_DE_PASSE, horloge=lambda: maintenant[0]).test_client()
+    connecter(client)
+    for _ in range(web.INACTIVITE_MINUTES + 1):  # la page se recharge seule pendant 31 min
+        maintenant[0] += 60
+        client.get("/?auto=1")
+    assert client.get("/").status_code == 302
+
+
+def test_alerte_cle_usb_sur_le_tableau_de_bord(client, config):
+    config.sauvegarde["copie_externe"] = "ARIA_point_sauvegardes"
+    connecter(client)
+    assert "clé USB" in client.get("/").get_data(as_text=True)

@@ -68,6 +68,11 @@ types_notifies = ["arrivee", "sortie"]
 
 [sauvegarde]
 retention_jours = 30    # les sauvegardes plus anciennes sont supprimées
+# Copie quotidienne sur une clé USB (ou un disque externe) : protège contre la panne
+# ou le vol du PC. Crée une fois un dossier de ce nom à la racine de la clé, puis
+# laisse-la branchée. La lettre de la clé (E:, F:...) peut changer, ce n'est pas grave.
+# Un chemin complet est aussi accepté ("E:/sauvegardes"). "" = pas de copie externe.
+copie_externe = ""
 
 [chemins]
 base = "data/pointage.db"

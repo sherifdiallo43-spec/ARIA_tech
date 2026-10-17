@@ -1,7 +1,7 @@
 """Le service qui tourne en continu sur le PC de l'école.
 
 Toutes les 30 s : lire la pointeuse, puis envoyer les messages en attente.
-Toutes les heures : sauvegarde (si plus de 24 h), rapports du jour et du mois (si absents),
+Toutes les heures : sauvegarde (si plus de 24 h), copie sur clé USB (si branchée), rapports du jour et du mois (si absents),
 envoi au directeur des rapports du personnel pas encore envoyés,
 et vidage de la mémoire de la pointeuse (si elle dépasse le seuil).
 Toutes les 6 h : remettre la pointeuse à l'heure.
@@ -48,6 +48,10 @@ def lancer(config: Config) -> None:
             reports.rapports_automatiques(conn, config)
         except Exception:
             log.exception("Erreur pendant la sauvegarde ou le rapport.")
+        try:
+            backup.copier_externe_si_besoin(conn, config)
+        except Exception:
+            log.exception("Erreur pendant la copie de la sauvegarde sur la clé USB.")
         try:
             courriel.envoyer_en_attente(conn, config, envoyeur_email,
                                         reports.rapports_personnel_recents(config, date.today()))
