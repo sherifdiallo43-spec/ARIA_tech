@@ -117,13 +117,26 @@ def _creer_message_twilio(client, **parametres) -> None:
         raise ErreurTemporaire(str(e)) from e
 
 
+def _client_twilio(account_sid: str, auth_token: str, api_key: str = "", api_secret: str = ""):
+    """Client Twilio, de préférence avec une clé d'API propre à l'école.
+
+    Le jeton principal (auth token) donne tout le compte : envois, historique
+    des messages de TOUTES les écoles, facturation. Une clé d'API par école se
+    révoque seule si le PC de cette école est compromis, sans toucher aux autres.
+    """
+    from twilio.rest import Client
+
+    if api_key and api_secret:
+        return Client(api_key, api_secret, account_sid)
+    return Client(account_sid, auth_token)
+
+
 class EnvoyeurTwilioSMS:
     """Envoi par SMS via Twilio (texte libre, aucun modèle à faire approuver)."""
 
-    def __init__(self, account_sid: str, auth_token: str, expediteur: str):
-        from twilio.rest import Client
-
-        self.client = Client(account_sid, auth_token)
+    def __init__(self, account_sid: str, auth_token: str, expediteur: str,
+                 api_key: str = "", api_secret: str = ""):
+        self.client = _client_twilio(account_sid, auth_token, api_key, api_secret)
         self.expediteur = expediteur
 
     def envoyer(self, tel: str, message: str, variables: dict) -> None:
@@ -133,10 +146,9 @@ class EnvoyeurTwilioSMS:
 class EnvoyeurTwilio:
     """Envoi réel par WhatsApp via Twilio."""
 
-    def __init__(self, account_sid: str, auth_token: str, expediteur: str, content_sid: str = ""):
-        from twilio.rest import Client
-
-        self.client = Client(account_sid, auth_token)
+    def __init__(self, account_sid: str, auth_token: str, expediteur: str, content_sid: str = "",
+                 api_key: str = "", api_secret: str = ""):
+        self.client = _client_twilio(account_sid, auth_token, api_key, api_secret)
         self.expediteur = expediteur if expediteur.startswith("whatsapp:") else f"whatsapp:{expediteur}"
         self.content_sid = content_sid
 
@@ -156,21 +168,22 @@ def creer_envoyeur(config: Config):
     mode = config.notifications["mode"]
     if mode == "console":
         return EnvoyeurConsole()
-    if mode == "twilio":
+    if mode in ("twilio", "twilio_sms"):
         s = config.secrets
-        manquants = [c for c in ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_FROM")
-                     if not s.get(c)]
+        expediteur = "TWILIO_WHATSAPP_FROM" if mode == "twilio" else "TWILIO_SMS_FROM"
+        manquants = [c for c in ("TWILIO_ACCOUNT_SID", expediteur) if not s.get(c)]
+        avec_cle = s.get("TWILIO_API_KEY_SID") and s.get("TWILIO_API_KEY_SECRET")
+        if not avec_cle and not s.get("TWILIO_AUTH_TOKEN"):
+            manquants.append("TWILIO_API_KEY_SID + TWILIO_API_KEY_SECRET (ou TWILIO_AUTH_TOKEN)")
         if manquants:
-            raise ValueError(f"Mode twilio : à remplir dans .env : {', '.join(manquants)}")
-        return EnvoyeurTwilio(s["TWILIO_ACCOUNT_SID"], s["TWILIO_AUTH_TOKEN"],
-                              s["TWILIO_WHATSAPP_FROM"], s.get("TWILIO_CONTENT_SID", ""))
-    if mode == "twilio_sms":
-        s = config.secrets
-        manquants = [c for c in ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_SMS_FROM")
-                     if not s.get(c)]
-        if manquants:
-            raise ValueError(f"Mode twilio_sms : à remplir dans .env : {', '.join(manquants)}")
-        return EnvoyeurTwilioSMS(s["TWILIO_ACCOUNT_SID"], s["TWILIO_AUTH_TOKEN"], s["TWILIO_SMS_FROM"])
+            raise ValueError(f"Mode {mode} : à remplir dans .env : {', '.join(manquants)}")
+        identifiants = {"api_key": s.get("TWILIO_API_KEY_SID", ""),
+                        "api_secret": s.get("TWILIO_API_KEY_SECRET", "")}
+        if mode == "twilio":
+            return EnvoyeurTwilio(s["TWILIO_ACCOUNT_SID"], s.get("TWILIO_AUTH_TOKEN", ""),
+                                  s[expediteur], s.get("TWILIO_CONTENT_SID", ""), **identifiants)
+        return EnvoyeurTwilioSMS(s["TWILIO_ACCOUNT_SID"], s.get("TWILIO_AUTH_TOKEN", ""),
+                                 s[expediteur], **identifiants)
     raise ValueError(f"Mode de notification inconnu : {mode!r} (attendu : 'console', 'twilio' ou 'twilio_sms')")
 
 

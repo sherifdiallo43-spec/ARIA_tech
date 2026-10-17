@@ -96,3 +96,19 @@ def test_limiteur_se_libere_apres_15_minutes():
     assert limiteur.bloque("10.0.0.5") and not limiteur.bloque("10.0.0.6")
     maintenant[0] += 15 * 60 + 1
     assert not limiteur.bloque("10.0.0.5")
+
+
+def test_deconnexion_apres_30_minutes_sans_activite(config, conn, trois_eleves):
+    from pointage import web
+
+    maintenant = [1_000_000.0]
+    client = create_app(config, MOT_DE_PASSE, horloge=lambda: maintenant[0]).test_client()
+    connecter(client)
+    maintenant[0] += 29 * 60
+    assert client.get("/").status_code == 200          # activité : le compteur repart
+    maintenant[0] += 29 * 60
+    assert client.get("/").status_code == 200
+    maintenant[0] += (web.INACTIVITE_MINUTES + 1) * 60
+    reponse = client.get("/")
+    assert reponse.status_code == 302 and "/connexion" in reponse.headers["Location"]
+    assert client.get("/rapports").status_code == 302  # la session a bien été effacée

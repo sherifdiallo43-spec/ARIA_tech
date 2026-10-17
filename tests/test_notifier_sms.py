@@ -18,3 +18,20 @@ def test_creer_envoyeur_sms_exige_le_numero_expediteur(config):
     config.secrets.update(TWILIO_ACCOUNT_SID="AC" + "0" * 32, TWILIO_AUTH_TOKEN="t" * 32)
     with pytest.raises(ValueError, match="TWILIO_SMS_FROM"):
         notifier.creer_envoyeur(config)
+
+
+def test_cle_api_de_l_ecole_preferee_au_jeton_principal(config):
+    """Avec une clé d'API, le jeton principal du compte n'est ni requis ni utilisé."""
+    config.notifications["mode"] = "twilio_sms"
+    config.secrets.update(TWILIO_ACCOUNT_SID="AC" + "0" * 32, TWILIO_SMS_FROM="+17372508034",
+                          TWILIO_API_KEY_SID="SK" + "1" * 32, TWILIO_API_KEY_SECRET="s" * 32)
+    with patch("twilio.rest.Client") as Client:
+        notifier.creer_envoyeur(config)
+    Client.assert_called_once_with("SK" + "1" * 32, "s" * 32, "AC" + "0" * 32)
+
+
+def test_sans_cle_ni_jeton_l_envoi_est_refuse(config):
+    config.notifications["mode"] = "twilio"
+    config.secrets.update(TWILIO_ACCOUNT_SID="AC" + "0" * 32, TWILIO_WHATSAPP_FROM="+14155238886")
+    with pytest.raises(ValueError, match="TWILIO_API_KEY_SID"):
+        notifier.creer_envoyeur(config)

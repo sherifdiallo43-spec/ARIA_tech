@@ -33,7 +33,7 @@ actualisation toutes les 30 s, navigation vers les jours précédents) et **Rapp
 (télécharger ou générer les PDF du jour et du mois).
 
 ```powershell
-# 1. Choisis un mot de passe (8 caractères minimum) dans le fichier .env :
+# 1. Choisis un mot de passe (12 caractères minimum) dans le fichier .env :
 #    DASHBOARD_PASSWORD=ton-mot-de-passe
 # 2. Lance le tableau de bord (en plus de `pt run`, dans un second terminal) :
 pt web
@@ -242,6 +242,10 @@ Vidage manuel : `pt vider-pointeuse`. La taille actuelle de la mémoire s'affich
 2. Console Twilio → Messaging → Try it out → WhatsApp : chaque téléphone de test doit envoyer
    le code `join ...` indiqué au numéro du bac à sable.
 3. Remplis `.env` (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`) et mets `mode = "twilio"` dans `config.toml`.
+   **Dans une école**, n'utilise jamais `TWILIO_AUTH_TOKEN` : crée une clé d'API par école
+   (Console Twilio > Account > API keys & tokens, type « Standard ») et remplis
+   `TWILIO_API_KEY_SID` et `TWILIO_API_KEY_SECRET` à la place. Si le PC d'une école est
+   compromis, tu révoques sa seule clé sans exposer ton compte ni les autres écoles.
 
 **Pour la production (de vrais parents) :**
 WhatsApp interdit d'écrire en texte libre à quelqu'un qui ne vous a pas écrit dans les

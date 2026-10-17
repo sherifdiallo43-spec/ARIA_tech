@@ -260,11 +260,13 @@ def _tester_envoi(config, args, mode, nom_canal):
 def cmd_web(config, args):
     from waitress import serve
 
+    from pointage import web
     from pointage.web import create_app
 
     mot_de_passe = config.secrets.get("DASHBOARD_PASSWORD", "")
-    if len(mot_de_passe) < 8:
-        sys.exit("Mets un mot de passe d'au moins 8 caractères dans .env (DASHBOARD_PASSWORD=...).")
+    if len(mot_de_passe) < web.MOT_DE_PASSE_MIN:
+        sys.exit(f"Mets un mot de passe d'au moins {web.MOT_DE_PASSE_MIN} caractères dans .env "
+                 "(DASHBOARD_PASSWORD=...). Une phrase est plus facile à retenir.")
     ouvrir_base(config).close()  # crée la base si elle n'existe pas encore
     # 127.0.0.1 : seul ce PC peut ouvrir le tableau de bord. 0.0.0.0 : tout le réseau de l'école.
     hote = "0.0.0.0" if args.reseau else "127.0.0.1"

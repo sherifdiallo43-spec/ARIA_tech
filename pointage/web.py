@@ -29,6 +29,8 @@ TYPES = {"arrivee": "Arrivée", "sortie": "Sortie"}
 
 ESSAIS_MAX = 5          # mots de passe faux autorisés...
 BLOCAGE_MINUTES = 15    # ...par appareil, avant un blocage de 15 minutes
+MOT_DE_PASSE_MIN = 12   # longueur minimale du mot de passe (vérifiée au lancement)
+INACTIVITE_MINUTES = 30 # sans clic pendant 30 min, il faut se reconnecter (PC partagé du secrétariat)
 
 
 class LimiteurConnexion:
@@ -62,7 +64,7 @@ class LimiteurConnexion:
             self.echecs.pop(ip, None)
 
 
-def create_app(config: Config, mot_de_passe: str) -> Flask:
+def create_app(config: Config, mot_de_passe: str, horloge=time.time) -> Flask:
     app = Flask(__name__, template_folder=str(Path(__file__).parent / "templates"))
     # Clé qui signe les cookies de connexion. Nouvelle à chaque démarrage : relancer
     # le service déconnecte tout le monde, ce qui est acceptable et plus sûr.
@@ -106,8 +108,18 @@ def create_app(config: Config, mot_de_passe: str) -> Flask:
 
     @app.before_request
     def exiger_connexion():
-        if request.endpoint not in ("connexion", "static") and not session.get("ok"):
+        if request.endpoint in ("connexion", "static"):
+            return None
+        if not session.get("ok"):
             return redirect(url_for("connexion"))
+        # Session abandonnée sur un PC partagé : au-delà de 30 min sans activité,
+        # quelqu'un d'autre est peut-être devant l'écran.
+        if horloge() - session.get("vu", 0) > INACTIVITE_MINUTES * 60:
+            session.clear()
+            flash("Session expirée après 30 minutes sans activité. Reconnecte-toi.")
+            return redirect(url_for("connexion"))
+        session["vu"] = horloge()
+        return None
 
     # --- Connexion ---------------------------------------------------------------
 
@@ -123,6 +135,7 @@ def create_app(config: Config, mot_de_passe: str) -> Flask:
                 limiteur.reussite(ip)
                 session.clear()
                 session["ok"] = True
+                session["vu"] = horloge()
                 return redirect(url_for("aujourdhui"))
             limiteur.echec(ip)
             flash("Mot de passe incorrect.")
