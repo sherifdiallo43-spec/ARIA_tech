@@ -186,7 +186,10 @@ def test_tableau_de_bord_ne_montre_pas_le_rapport_du_personnel(conn, config, pro
     synchro(conn, config, ("900", maintenant))
     reports.generer_rapport_personnel_jour(conn, config, maintenant.date())
     client = create_app(config, "mot-de-passe-test").test_client()
-    page = client.post("/connexion", data={"mot_de_passe": "mot-de-passe-test"},
+    import re
+    html_connexion = client.get("/connexion").get_data(as_text=True)
+    jeton = re.search(r'name="csrf" value="([^"]+)"', html_connexion).group(1)
+    page = client.post("/connexion", data={"mot_de_passe": "mot-de-passe-test", "csrf": jeton},
                        follow_redirects=True).get_data(as_text=True)
     assert "Mamadou Ndiaye" in page                 # nommé dans les derniers pointages, pas « Inconnu »
     assert "<h2>Personnel</h2>" not in page

@@ -81,7 +81,7 @@ def create_app(config: Config, mot_de_passe: str, horloge=time.time) -> Flask:
         reponse.headers["X-Content-Type-Options"] = "nosniff"
         reponse.headers["Referrer-Policy"] = "no-referrer"
         reponse.headers["Content-Security-Policy"] = (
-            "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+            "default-src 'self'; img-src 'self' data:; "
             "form-action 'self'; frame-ancestors 'none'")
         reponse.headers["Cache-Control"] = "no-store"
         return reponse
@@ -91,9 +91,20 @@ def create_app(config: Config, mot_de_passe: str, horloge=time.time) -> Flask:
         """"07:42" -> "07h42"."""
         return texte.replace(":", "h") if texte else ""
 
+    def jeton_csrf() -> str:
+        """Jeton anti-CSRF propre à la session, inséré dans chaque formulaire POST.
+
+        Empêche un autre site de faire exécuter une action (générer un rapport,
+        déconnecter) au navigateur d'un administrateur déjà connecté.
+        """
+        if "csrf" not in session:
+            session["csrf"] = secrets.token_hex(16)
+        return session["csrf"]
+
     @app.context_processor
     def contexte_commun():
-        return {"nom_ecole": config.nom_ecole, "connecte": session.get("ok", False)}
+        return {"nom_ecole": config.nom_ecole, "connecte": session.get("ok", False),
+                "csrf_token": jeton_csrf()}
 
     def conn():
         if "conn" not in g:
@@ -105,6 +116,17 @@ def create_app(config: Config, mot_de_passe: str, horloge=time.time) -> Flask:
         c = g.pop("conn", None)
         if c is not None:
             c.close()
+
+    @app.before_request
+    def verifier_csrf():
+        # Toute action (POST) doit porter le jeton de la session. Un formulaire
+        # soumis depuis un autre site ne l'a pas : il est rejeté.
+        if request.method == "POST":
+            attendu = session.get("csrf", "")
+            recu = request.form.get("csrf", "")
+            if not attendu or not hmac.compare_digest(attendu, recu):
+                abort(400)
+        return None
 
     @app.before_request
     def exiger_connexion():

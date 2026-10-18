@@ -7,7 +7,8 @@
 <div class="deux">
   <section class="carte">
     <h2>Créer un rapport du jour</h2>
-    <form method="post" action="{{ url_for('generer') }}" style="display:flex;gap:8px;flex-wrap:wrap">
+    <form method="post" action="{{ url_for('generer') }}" class="form-generer">
+      <input type="hidden" name="csrf" value="{{ csrf_token }}">
       <input type="hidden" name="type" value="jour">
       <input type="date" name="jour" value="{{ aujourdhui }}" max="{{ aujourdhui }}" required>
       <button class="bouton" type="submit">Générer</button>
@@ -15,7 +16,8 @@
   </section>
   <section class="carte">
     <h2>Créer un rapport du mois</h2>
-    <form method="post" action="{{ url_for('generer') }}" style="display:flex;gap:8px;flex-wrap:wrap">
+    <form method="post" action="{{ url_for('generer') }}" class="form-generer">
+      <input type="hidden" name="csrf" value="{{ csrf_token }}">
       <input type="hidden" name="type" value="mois">
       <input type="month" name="mois" value="{{ ce_mois }}" max="{{ ce_mois }}" required>
       <button class="bouton" type="submit">Générer</button>

@@ -1,3 +1,4 @@
+import re
 from datetime import date, datetime
 
 import pytest
@@ -19,8 +20,17 @@ def client(config, conn, trois_eleves):
     return create_app(config, MOT_DE_PASSE).test_client()
 
 
+def jeton_csrf(client, page="/connexion"):
+    """Lit le jeton CSRF inséré dans les formulaires de la page demandée."""
+    html = client.get(page).get_data(as_text=True)
+    trouve = re.search(r'name="csrf" value="([^"]+)"', html)
+    return trouve.group(1) if trouve else ""
+
+
 def connecter(client):
-    return client.post("/connexion", data={"mot_de_passe": MOT_DE_PASSE}, follow_redirects=True)
+    return client.post("/connexion",
+                       data={"mot_de_passe": MOT_DE_PASSE, "csrf": jeton_csrf(client)},
+                       follow_redirects=True)
 
 
 def test_acces_refuse_sans_connexion(client):
@@ -31,7 +41,8 @@ def test_acces_refuse_sans_connexion(client):
 
 def test_mauvais_mot_de_passe(client, monkeypatch):
     monkeypatch.setattr("time.sleep", lambda s: None)  # on n'attend pas la seconde de pénalité
-    reponse = client.post("/connexion", data={"mot_de_passe": "faux"}, follow_redirects=True)
+    reponse = client.post("/connexion", data={"mot_de_passe": "faux", "csrf": jeton_csrf(client)},
+                          follow_redirects=True)
     assert "Mot de passe incorrect" in reponse.get_data(as_text=True)
     assert client.get("/").status_code == 302
 
@@ -50,7 +61,8 @@ def test_jour_invalide_retombe_sur_aujourdhui(client):
 def test_generer_et_telecharger_un_rapport(client, config):
     connecter(client)
     jour = date.today().isoformat()
-    client.post("/rapports/generer", data={"type": "jour", "jour": jour})
+    client.post("/rapports/generer",
+                data={"type": "jour", "jour": jour, "csrf": jeton_csrf(client, "/rapports")})
     nom = f"rapport_{jour}.pdf"
     assert nom in client.get("/rapports").get_data(as_text=True)
     pdf = client.get(f"/rapports/journaliers/{nom}")
@@ -78,12 +90,21 @@ def test_entetes_de_securite(client):
 
 
 def test_blocage_apres_trop_d_essais(client):
+    jeton = jeton_csrf(client)  # un échec ne vide pas la session : le jeton reste valable
     for _ in range(5):
-        client.post("/connexion", data={"mot_de_passe": "faux"})
+        client.post("/connexion", data={"mot_de_passe": "faux", "csrf": jeton})
     # 6e essai, même avec le BON mot de passe : refusé pendant le blocage
-    reponse = client.post("/connexion", data={"mot_de_passe": MOT_DE_PASSE})
+    reponse = client.post("/connexion", data={"mot_de_passe": MOT_DE_PASSE, "csrf": jeton})
     assert reponse.status_code == 429
     assert client.get("/").status_code == 302
+
+
+def test_csrf_rejette_un_post_sans_jeton(client):
+    # Une action soumise sans le jeton de la session (ex. depuis un autre site) est refusée.
+    assert client.post("/connexion", data={"mot_de_passe": MOT_DE_PASSE}).status_code == 400
+    connecter(client)  # mais une vraie connexion, avec jeton, fonctionne
+    assert client.post("/rapports/generer",
+                       data={"type": "jour", "jour": date.today().isoformat()}).status_code == 400
 
 
 def test_limiteur_se_libere_apres_15_minutes():

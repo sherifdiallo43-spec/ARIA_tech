@@ -16,7 +16,7 @@
   <a class="bouton discret" href="{{ url_for('aujourdhui', jour=veille) }}">← Veille</a>
   {% if lendemain %}<a class="bouton discret" href="{{ url_for('aujourdhui', jour=lendemain) }}">Lendemain →</a>{% endif %}
   {% if not est_aujourdhui %}<a class="bouton discret" href="{{ url_for('aujourdhui') }}">Aujourd'hui</a>{% endif %}
-  <form method="get" style="margin:0;display:flex;gap:8px">
+  <form method="get" class="form-filtre">
     <input type="date" name="jour" value="{{ jour.isoformat() }}" max="{{ jour.today().isoformat() }}">
     <button class="bouton" type="submit">Voir</button>
   </form>

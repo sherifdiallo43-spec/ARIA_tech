@@ -4,73 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block titre %}ARIA_point{% endblock %} · {{ nom_ecole }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 {% block entete %}{% endblock %}
-<style>
-  :root {
-    --nuit: #14213d; --accent: #1f9e89; --zebre: #f3f5f8; --gris: #6b7280;
-    --vert: #1a8f6a; --rouge: #c0392b; --orange: #d9891a; --fond: #eef1f5;
-    --bord: #dfe3ea; --carte: #ffffff; --texte: #14213d;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root { --nuit: #0b1426; --zebre: #1b2740; --fond: #0f1830; --bord: #2a3856;
-            --carte: #16213a; --texte: #e8ecf4; --gris: #9aa6bd; }
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--fond); color: var(--texte);
-         font: 15px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-  header { background: var(--nuit); color: #fff; }
-  .barre { max-width: 1100px; margin: 0 auto; padding: 14px 16px; display: flex;
-           align-items: center; gap: 18px; flex-wrap: wrap; }
-  .marque { font-weight: 700; font-size: 18px; letter-spacing: .3px; }
-  .marque small { display: block; font-weight: 400; font-size: 12px; opacity: .7; }
-  nav { display: flex; gap: 6px; margin-left: auto; align-items: center; }
-  nav a, nav button { color: #fff; text-decoration: none; padding: 7px 13px; border-radius: 8px;
-                      background: none; border: 0; font: inherit; cursor: pointer; opacity: .8; }
-  nav a:hover, nav button:hover, nav a.actif { background: rgba(255,255,255,.14); opacity: 1; }
-  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 48px; }
-  h1 { font-size: 22px; margin: 0 0 4px; }
-  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; margin: 0 0 12px; }
-  h2::before { content: ""; display: block; width: 16px; height: 4px; background: var(--accent);
-               border-radius: 2px; margin-bottom: 8px; }
-  .sous-titre { color: var(--gris); margin: 0 0 18px; }
-  .carte { background: var(--carte); border: 1px solid var(--bord); border-radius: 12px;
-           padding: 18px; margin-bottom: 18px; overflow-x: auto; }
-  .grille { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            margin-bottom: 18px; }
-  .stat { background: var(--carte); border: 1px solid var(--bord); border-radius: 12px; padding: 16px; }
-  .stat .nombre { font-size: 34px; font-weight: 700; line-height: 1.1; }
-  .stat .libelle { color: var(--gris); font-size: 13px; }
-  .deux { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
-  table { width: 100%; border-collapse: collapse; }
-  th { background: var(--nuit); color: #fff; text-align: left; padding: 9px 12px; font-size: 13px; }
-  th:first-child { border-radius: 8px 0 0 8px; } th:last-child { border-radius: 0 8px 8px 0; }
-  td { padding: 9px 12px; }
-  tbody tr:nth-child(even) { background: var(--zebre); }
-  .present { color: var(--vert); font-weight: 600; }
-  .absent { color: var(--rouge); font-weight: 600; }
-  .retard { color: var(--orange); font-weight: 600; }
-  .oubli { color: var(--orange); font-style: italic; }
-  .vide { color: var(--gris); margin: 6px 0; }
-  .bilan { color: var(--gris); margin: 10px 0 0; font-size: 14px; }
-  .bilan b { color: var(--texte); }
-  .pastille { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px;
-              background: var(--rouge); }
-  .pastille.ok { background: var(--vert); }
-  .jours { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 18px; }
-  .bouton, button.bouton { background: var(--accent); color: #fff; border: 0; border-radius: 8px;
-                           padding: 8px 14px; font: inherit; text-decoration: none; cursor: pointer; }
-  .bouton.discret { background: var(--carte); color: var(--texte); border: 1px solid var(--bord); }
-  input[type=date], input[type=month], input[type=password] {
-    padding: 8px 10px; border-radius: 8px; border: 1px solid var(--bord); font: inherit;
-    background: var(--carte); color: var(--texte); }
-  .message { background: var(--zebre); border-left: 4px solid var(--accent); padding: 10px 14px;
-             border-radius: 8px; margin-bottom: 16px; }
-  ul.fichiers { list-style: none; padding: 0; margin: 0; }
-  ul.fichiers li { padding: 9px 0; border-bottom: 1px solid var(--bord); }
-  ul.fichiers li:last-child { border: 0; }
-  ul.fichiers a { color: var(--accent); text-decoration: none; font-weight: 600; }
-  .centre { max-width: 360px; margin: 12vh auto 0; }
-</style>
 </head>
 <body>
 <header>
@@ -80,7 +15,8 @@
     <nav>
       <a href="{{ url_for('aujourdhui') }}" class="{{ 'actif' if request.endpoint == 'aujourdhui' }}">Aujourd'hui</a>
       <a href="{{ url_for('rapports_page') }}" class="{{ 'actif' if request.endpoint == 'rapports_page' }}">Rapports</a>
-      <form method="post" action="{{ url_for('deconnexion') }}" style="margin:0">
+      <form method="post" action="{{ url_for('deconnexion') }}" class="form-nav">
+        <input type="hidden" name="csrf" value="{{ csrf_token }}">
         <button type="submit">Déconnexion</button>
       </form>
     </nav>
