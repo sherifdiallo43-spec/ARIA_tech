@@ -28,6 +28,35 @@ class PointageBrut:
     horodatage: datetime
 
 
+@dataclass(frozen=True)
+class FicheEmpreintes:
+    """Une personne enregistrée sur un boîtier, avec ses empreintes, prête à être recopiée."""
+    zk_user_id: str
+    nom: str
+    privilege: int          # 0 = utilisateur, 14 = administrateur du boîtier
+    mot_de_passe: str
+    groupe: str
+    carte: int
+    doigts: tuple[tuple[int, int, bytes], ...]  # (numéro du doigt 0-9, valide, modèle d'empreinte)
+
+
+@dataclass
+class CarnetEmpreintes:
+    """Tout ce qu'un boîtier sait des personnes : de quoi en remplir un autre à l'identique."""
+    fiches: list[FicheEmpreintes]
+    taille_fiche: int  # format des fiches utilisateur (28 ou 72 octets), propre au firmware
+
+    @property
+    def nb_doigts(self) -> int:
+        return sum(len(f.doigts) for f in self.fiches)
+
+    def incompletes_dans(self, autre: CarnetEmpreintes) -> list[str]:
+        """Numéros absents de `autre`, ou présents avec moins d'empreintes qu'ici."""
+        doigts_autre = {f.zk_user_id: len(f.doigts) for f in autre.fiches}
+        return [f.zk_user_id for f in self.fiches
+                if doigts_autre.get(f.zk_user_id, -1) < len(f.doigts)]
+
+
 class Pointeuse(Protocol):
     def lire_pointages(self) -> list[PointageBrut]: ...
     def synchroniser_heure(self) -> None: ...
@@ -100,6 +129,79 @@ class ZKPointeuse:
                 conn.enable_device()  # toujours débloquer, même en cas d'erreur
         log.info("Mémoire de la pointeuse vidée (%d pointages).", len(bruts))
         return len(bruts)
+
+    def lire_empreintes(self) -> CarnetEmpreintes:
+        """Lit toutes les personnes du boîtier et leurs empreintes."""
+        with self._connexion() as conn:
+            utilisateurs = conn.get_users()
+            modeles = conn.get_templates()
+            taille_fiche = int(conn.user_packet_size)
+        # Les empreintes sont rangées par numéro interne du boîtier (uid), pas par zk_user_id.
+        par_uid: dict[int, list[tuple[int, int, bytes]]] = {}
+        for m in modeles:
+            par_uid.setdefault(m.uid, []).append((m.fid, m.valid, m.template))
+        fiches = []
+        for u in utilisateurs:
+            nom = "" if u.name == f"NN-{u.user_id}" else u.name  # pyzk invente "NN-12" quand le nom est vide
+            fiches.append(FicheEmpreintes(str(u.user_id), nom, int(u.privilege), u.password,
+                                          u.group_id, int(u.card), tuple(sorted(par_uid.get(u.uid, [])))))
+        return CarnetEmpreintes(fiches, taille_fiche)
+
+    def ecrire_empreintes(self, carnet: CarnetEmpreintes,
+                          progression: Callable[[int, int], None] | None = None) -> int:
+        """Enregistre sur ce boîtier chaque personne du carnet, avec ses empreintes.
+
+        Une personne déjà présente (même zk_user_id) est mise à jour. Les personnes
+        du boîtier absentes du carnet ne sont pas touchées. Le boîtier est bloqué
+        pendant l'écriture : personne ne peut pointer, à faire hors des heures de passage.
+        """
+        from zk.finger import Finger
+        from zk.user import User
+
+        with self._connexion() as conn:
+            # Chaque boîtier numérote ses fiches à sa façon (uid interne). Réutiliser l'uid de
+            # la source écraserait une autre personne : on garde celui du boîtier cible,
+            # et les nouveaux arrivants prennent les uid libres après le plus grand.
+            existants = {u.user_id: u.uid for u in conn.get_users()}
+            if not existants:
+                # Boîtier neuf : pyzk ne peut pas deviner le format de ses fiches (il ne le
+                # déduit que des fiches existantes). Même modèle que la source = même format.
+                conn.user_packet_size = carnet.taille_fiche
+            self._verifier_capacite(conn, carnet, existants)
+            prochain_uid = max(existants.values(), default=0) + 1
+
+            conn.disable_device()
+            try:
+                for i, fiche in enumerate(carnet.fiches, 1):
+                    uid = existants.get(fiche.zk_user_id)
+                    if uid is None:
+                        uid, prochain_uid = prochain_uid, prochain_uid + 1
+                    utilisateur = User(uid, fiche.nom, fiche.privilege, fiche.mot_de_passe,
+                                       fiche.groupe, fiche.zk_user_id, fiche.carte)
+                    conn.save_user_template(utilisateur, [Finger(uid, fid, valide, modele)
+                                                          for fid, valide, modele in fiche.doigts])
+                    if progression:
+                        progression(i, len(carnet.fiches))
+            finally:
+                conn.enable_device()  # toujours débloquer, même si l'écriture plante en route
+        log.info("%d fiche(s) écrite(s) sur %s.", len(carnet.fiches), self.ip)
+        return len(carnet.fiches)
+
+    def _verifier_capacite(self, conn, carnet: CarnetEmpreintes, existants: dict) -> None:
+        """Refuse AVANT d'écrire quoi que ce soit si le boîtier n'a pas la place.
+
+        Une personne déjà présente garde sa place : seules les nouvelles comptent.
+        Certains boîtiers annoncent une capacité de 0 (inconnue) : on ne vérifie pas.
+        """
+        conn.read_sizes()
+        nouvelles = [f for f in carnet.fiches if f.zk_user_id not in existants]
+        doigts_en_plus = sum(len(f.doigts) for f in nouvelles)
+        if conn.users_cap and conn.users + len(nouvelles) > conn.users_cap:
+            raise ValueError(f"Pointeuse {self.ip} pleine : {conn.users} personnes + {len(nouvelles)} "
+                             f"nouvelles, pour {conn.users_cap} places. Rien n'a été écrit.")
+        if conn.fingers_cap and conn.fingers + doigts_en_plus > conn.fingers_cap:
+            raise ValueError(f"Pointeuse {self.ip} pleine : {conn.fingers} empreintes + {doigts_en_plus} "
+                             f"nouvelles, pour {conn.fingers_cap} places. Rien n'a été écrit.")
 
 
 class MultiPointeuse:
@@ -254,6 +356,14 @@ def _creer_zk(reglages: dict, secrets: dict) -> ZKPointeuse:
         mot_de_passe=int(secrets.get("ZK_MOT_DE_PASSE") or 0),
         forcer_udp=bool(reglages.get("forcer_udp", False)),
     )
+
+
+def lister_pointeuses_zk(config) -> list[tuple[str, ZKPointeuse]]:
+    """Chaque vrai boîtier déclaré dans config.toml, avec son nom (son IP à défaut)."""
+    if config.pointeuse["mode"] != "zk":
+        return []
+    reglages = getattr(config, "pointeuses", None) or [config.pointeuse]
+    return [(r.get("nom") or r["ip"], _creer_zk(r, config.secrets)) for r in reglages]
 
 
 def creer_pointeuse(config) -> Pointeuse:

@@ -136,6 +136,8 @@ Pour voir les messages, simule une heure proche de l'heure actuelle ou à venir.
 | `pt vider-pointeuse` | Met tout en sécurité puis vide la mémoire du boîtier |
 | `pt statut` | Résumé : élèves, abonnements, pointages du jour, messages en attente, mémoire du boîtier |
 | `pt utilisateurs` | Liste les utilisateurs enregistrés dans la pointeuse |
+| `pt verifier-numeros` | Compare les numéros du boîtier avec la base (doigts manquants, fautes de frappe) |
+| `pt copier-empreintes [--source NOM]` | Recopie les personnes et empreintes d'un boîtier vers les autres (voir plus bas) |
 
 ## Fichier des élèves (CSV)
 
@@ -224,6 +226,25 @@ déclaration à la CDP, avec le consentement écrit de chaque membre.
 5. Test : `pt utilisateurs`, puis `pt sync`.
 
 Si la connexion échoue avec un vieux modèle, essaie `forcer_udp = true`.
+
+### Plusieurs pointeuses : enregistrer les doigts une seule fois
+
+Un élève doit pouvoir pointer à n'importe quelle entrée, donc ses empreintes doivent être
+sur **tous** les boîtiers. Inutile de l'enregistrer 3 fois :
+
+1. Enregistre tous les doigts sur **un seul** boîtier (le premier de `config.toml`).
+2. Branche les autres sur le réseau, chacun avec son bloc `[[pointeuses]]`.
+3. `pt copier-empreintes` : lit le premier boîtier, recopie chaque personne et ses empreintes
+   sur les autres, puis **relit** chaque boîtier pour vérifier que rien ne manque.
+   Si les doigts ont été enregistrés ailleurs : `pt copier-empreintes --source "Portail sud"`.
+
+- Les personnes déjà présentes sont mises à jour, celles qui ne sont que sur le boîtier cible
+  ne sont pas touchées. La copie peut être relancée sans risque (après de nouvelles inscriptions).
+- Chaque boîtier est **bloqué** pendant la copie (plusieurs minutes pour 1 000 élèves) :
+  à faire le soir ou le week-end, jamais aux heures de passage.
+- Si un boîtier n'a pas la place, rien n'y est écrit et la commande le dit.
+- Utilise **le même modèle** partout : le format des empreintes dépend du boîtier.
+- Avant la première école, teste sur 2 vrais boîtiers qu'un doigt copié est bien reconnu.
 
 ### Mémoire du boîtier
 

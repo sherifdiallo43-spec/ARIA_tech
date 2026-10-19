@@ -12,7 +12,7 @@ from pointage import (archive, backup, collector, courriel, db, eleves, notifier
                       reports, service, verification)
 from pointage.config import Config, charger
 from pointage.device import (PointeuseSimulee, PointageBrut, creer_pointeuse, generer_journee,
-                             generer_journee_personnel)
+                             generer_journee_personnel, lister_pointeuses_zk)
 from pointage.subscriptions import enregistrer_paiement, statut_abonnement
 
 
@@ -325,6 +325,62 @@ def cmd_verifier_numeros(config, args):
         print("\nTout est cohérent.")
 
 
+def cmd_copier_empreintes(config, args):
+    """Recopie les personnes et leurs empreintes d'un boîtier vers tous les autres."""
+    boitiers = lister_pointeuses_zk(config)
+    if len(boitiers) < 2:
+        sys.exit("Il faut au moins 2 pointeuses en mode \"zk\" (blocs [[pointeuses]] dans config.toml).")
+    if args.source:
+        choisis = [b for b in boitiers if args.source in (b[0], b[1].ip)]
+        if not choisis:
+            sys.exit(f"Aucune pointeuse ne s'appelle « {args.source} ». Noms possibles : "
+                     + ", ".join(nom for nom, _ in boitiers))
+        nom_source, source = choisis[0]
+    else:
+        nom_source, source = boitiers[0]
+    cibles = [b for b in boitiers if b[1] is not source]
+
+    try:
+        carnet = source.lire_empreintes()
+    except Exception as e:
+        sys.exit(f"Lecture de « {nom_source} » impossible ({type(e).__name__} : {e}).")
+    print(f"« {nom_source} » : {len(carnet.fiches)} personne(s), {carnet.nb_doigts} empreinte(s).")
+    if not carnet.fiches:
+        sys.exit("Rien à copier : enregistre d'abord les doigts sur ce boîtier.")
+    print(f"Elles vont être recopiées sur : {', '.join(nom for nom, _ in cibles)}.\n"
+          "Les personnes déjà présentes sont mises à jour, les autres ne sont pas touchées.\n"
+          "Chaque boîtier est BLOQUÉ pendant la copie (plusieurs minutes pour 1 000 élèves) :\n"
+          "à faire hors des heures d'arrivée et de sortie.")
+    if not args.oui and input("Tape COPIER pour confirmer : ").strip() != "COPIER":
+        print("Annulé, rien n'a été copié.")
+        return
+
+    def progression(fait, total):
+        if fait % 100 == 0 or fait == total:
+            print(f"  {fait}/{total}")
+
+    echecs = []
+    for nom, cible in cibles:
+        print(f"\nCopie vers « {nom} »...")
+        try:
+            cible.ecrire_empreintes(carnet, progression)
+            # On relit le boîtier : seule une relecture prouve que les empreintes y sont.
+            incompletes = carnet.incompletes_dans(cible.lire_empreintes())
+        except Exception as e:
+            print(f"  ÉCHEC ({type(e).__name__} : {e})")
+            echecs.append(nom)
+            continue
+        if incompletes:
+            print(f"  ATTENTION : {len(incompletes)} personne(s) absente(s) ou incomplète(s) après la copie : "
+                  + ", ".join(incompletes[:30]) + (" ..." if len(incompletes) > 30 else ""))
+            echecs.append(nom)
+        else:
+            print("  Vérifié : toutes les personnes et empreintes sont présentes.")
+    if echecs:
+        sys.exit(f"\nÀ relancer pour : {', '.join(echecs)}. La copie peut être refaite sans risque.")
+    print("\nCopie terminée sur tous les boîtiers.")
+
+
 # --- Analyse de la ligne de commande -------------------------------------------
 
 def construire_parseur() -> argparse.ArgumentParser:
@@ -415,6 +471,12 @@ def construire_parseur() -> argparse.ArgumentParser:
     sous.add_parser("verifier-numeros",
                     help="compare les numéros du boîtier avec la base (doigts manquants, fautes de frappe)"
                     ).set_defaults(func=cmd_verifier_numeros)
+
+    s = sous.add_parser("copier-empreintes",
+                        help="recopie les personnes et empreintes d'un boîtier vers les autres")
+    s.add_argument("--source", help="nom ou IP du boîtier de départ (par défaut : le premier de config.toml)")
+    s.add_argument("--oui", action="store_true", help="ne pas demander de confirmation")
+    s.set_defaults(func=cmd_copier_empreintes)
     return p
 
 
