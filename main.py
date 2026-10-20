@@ -27,7 +27,6 @@ def configurer_logs(config: Config) -> None:
     for gestionnaire in (fichier, ecran):
         gestionnaire.setFormatter(format_)
     logging.basicConfig(level=logging.INFO, handlers=[fichier, ecran])
-    logging.getLogger("twilio").setLevel(logging.WARNING)  # sinon chaque envoi affiche tous les en-têtes HTTP
 
 
 def ouvrir_base(config: Config):
@@ -254,29 +253,39 @@ def cmd_statut(config, args):
           f"dernier vidage : {db.lire_etat(conn, 'dernier_vidage', 'jamais')})")
 
 
+# Erreurs Meta fréquentes pendant la mise en route, et quoi faire.
+CONSEILS_META = {
+    "131030": "Numéro de test de Meta : ajoute d'abord ce téléphone dans la liste des destinataires "
+              "(developers.facebook.com > ton app > WhatsApp > API Setup > To).",
+    "131047": "Texte libre refusé : ce téléphone n'a pas écrit au numéro dans les dernières 24 h. "
+              "Envoie-lui un message depuis ce téléphone, ou utilise les modèles (texte_libre = false).",
+    "132001": "Modèle introuvable : vérifie son nom dans [notifications.modeles_meta], sa langue "
+              "(langue_meta) et qu'il est bien approuvé dans WhatsApp Manager.",
+    "190": "Jeton expiré ou invalide : le jeton de test ne dure que 24 h. Recopie-le dans META_JETON "
+           "(.env), ou crée un jeton permanent (voir README, « Brancher WhatsApp »).",
+}
+
+
 def cmd_test_whatsapp(config, args):
-    _tester_envoi(config, args, "twilio", "WhatsApp")
-
-
-def cmd_test_sms(config, args):
-    _tester_envoi(config, args, "twilio_sms", "SMS")
-
-
-def _tester_envoi(config, args, mode, nom_canal):
-    """Envoie un message de test par Twilio, quel que soit le mode réglé dans config.toml."""
+    """Envoie un message de test par Meta, quel que soit le mode réglé dans config.toml."""
     tel = eleves.normaliser_telephone(args.numero)
-    config.notifications["mode"] = mode
-    envoyeur = notifier.creer_envoyeur(config)
-    message = f"{config.nom_ecole} : test ARIA_point. Si tu lis ce message, {nom_canal} fonctionne."
-    variables = {"1": config.nom_ecole, "2": "Élève Test", "3": "est arrivé(e) à l'école", "4": "07h42"}
+    config.notifications["mode"] = "meta"
     try:
-        envoyeur.envoyer(tel, message, variables)
+        envoyeur = notifier.creer_envoyeur(config)
+    except ValueError as e:
+        sys.exit(str(e))
+    try:
+        if args.hello:
+            # Modèle fourni d'office par Meta : vérifie le jeton et le numéro, sans modèle à soi.
+            envoyeur.envoyer_modele(tel, "hello_world", "en_US")
+        else:
+            eleve = {"prenom": "Awa", "nom": "Test", "classe": "6e A"}
+            message, variables = notifier.composer_message(
+                eleve, "arrivee", datetime.now().replace(hour=7, minute=42), False, config.nom_ecole)
+            envoyeur.envoyer(tel, message, variables)
     except (notifier.ErreurDefinitive, notifier.ErreurTemporaire) as e:
-        conseil = ""
-        if "63015" in str(e):  # téléphone pas encore inscrit au bac à sable
-            conseil = (" Bac à sable : ce téléphone a-t-il envoyé le message 'join ...' au numéro Twilio"
-                       " (il expire au bout de 72 h environ) ?")
-        sys.exit(f"Échec de l'envoi à {tel} : {e}{conseil}")
+        conseil = next((c for code, c in CONSEILS_META.items() if f"Meta {code} " in str(e)), "")
+        sys.exit(f"Échec de l'envoi à {tel} : {e}" + (f"\n{conseil}" if conseil else ""))
     print(f"Message envoyé à {tel}. Regarde ton téléphone.")
 
 
@@ -432,12 +441,10 @@ def construire_parseur() -> argparse.ArgumentParser:
     sous.add_parser("sync", help="une lecture de la pointeuse + envoi des messages").set_defaults(func=cmd_sync)
     sous.add_parser("run", help="lance le service en continu").set_defaults(func=cmd_run)
 
-    s = sous.add_parser("test-sms", help="envoie un SMS de test (Twilio)")
+    s = sous.add_parser("test-whatsapp", help="envoie une alerte WhatsApp de test (Meta)")
     s.add_argument("numero", help="ex. 76 500 08 43")
-    s.set_defaults(func=cmd_test_sms)
-
-    s = sous.add_parser("test-whatsapp", help="envoie un message WhatsApp de test (Twilio)")
-    s.add_argument("numero", help="ex. 76 500 08 43")
+    s.add_argument("--hello", action="store_true",
+                   help="envoie le modèle hello_world de Meta (vérifie le jeton et le numéro)")
     s.set_defaults(func=cmd_test_whatsapp)
 
     s = sous.add_parser("web", help="lance le tableau de bord web")

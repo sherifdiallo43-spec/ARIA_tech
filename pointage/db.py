@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     type        TEXT    NOT NULL,  -- arrivee, sortie ou absence
     tel         TEXT    NOT NULL,
     message     TEXT    NOT NULL,
-    variables   TEXT    NOT NULL,  -- JSON, pour les modèles de message Twilio
+    variables   TEXT    NOT NULL,  -- JSON, pour les modèles de message WhatsApp
     statut      TEXT    NOT NULL,  -- en_attente, envoye, echec, ignore_abonnement, ignore_trop_ancien
     tentatives  INTEGER NOT NULL DEFAULT 0,
     erreur      TEXT,

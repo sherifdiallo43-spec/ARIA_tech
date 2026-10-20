@@ -61,11 +61,11 @@ en-têtes de sécurité, aucune donnée ni secret envoyé sur GitHub), mais l'in
    `ZK_MOT_DE_PASSE`) et, si possible, la brancher sur un réseau séparé du Wi-Fi des visiteurs.
    Son protocole n'est pas chiffré.
 5. **Ne jamais copier `.env`** ailleurs que sur ce PC, et ne pas partager le dossier `data/`.
-   Dans une école, utiliser une clé d'API Twilio propre à l'école, jamais le jeton principal
-   (voir « Brancher WhatsApp »).
+   Le jeton WhatsApp (`META_JETON`) permet d'envoyer des messages au nom d'ARIA_point :
+   si un PC d'école est volé, révoque-le aussitôt (voir « Brancher WhatsApp »).
 6. **Clé USB de sauvegarde chiffrée** (voir « Sauvegardes sur clé USB ») : elle contient les
    noms et les téléphones des parents. Perdue sans chiffrement, ce serait une fuite de données.
-7. **Informer les parents** que le nom de l'enfant transite par Twilio et WhatsApp (serveurs
+7. **Informer les parents** que le nom de l'enfant transite par WhatsApp, de Meta (serveurs
    à l'étranger) quand les alertes sont activées, et le mentionner dans la déclaration à la CDP.
 
 ## Installation (Windows)
@@ -79,7 +79,7 @@ cd C:\Users\DELL\Documents\pointage-scolaire
 # 1. Environnement virtuel : les bibliothèques du projet restent isolées du reste du PC
 py -m venv .venv
 
-# 2. Installation des bibliothèques (pyzk, twilio, fpdf2, flask, waitress...)
+# 2. Installation des bibliothèques (pyzk, fpdf2, flask, waitress...)
 .venv\Scripts\python -m pip install -r requirements.txt
 
 # 3. Fichier des secrets
@@ -125,7 +125,7 @@ Pour voir les messages, simule une heure proche de l'heure actuelle ou à venir.
 | `pt paiement 12 --mois 3` | Enregistre un paiement de 3 mois pour l'élève n° 12 de la pointeuse |
 | `pt sync` | Une seule lecture de la pointeuse, plus l'envoi des messages en attente |
 | `pt run` | Le service en continu (c'est ce qui tourne à l'école) |
-| `pt test-whatsapp NUMERO` | Envoie un message WhatsApp de test pour vérifier le compte Twilio |
+| `pt test-whatsapp NUMERO [--hello]` | Envoie une alerte WhatsApp de test via Meta (`--hello` : le modèle hello_world de Meta, pour vérifier le jeton) |
 | `pt web [--port N] [--reseau]` | Le tableau de bord web (mot de passe dans `.env`) |
 | `pt simuler --jours N` / `--n N [--profs N] [--heure HH:MM]` | Ajoute des pointages dans la fausse pointeuse |
 | `pt rapport [--jour AAAA-MM-JJ]` | Rapport PDF d'une journée (par défaut : aujourd'hui) |
@@ -292,28 +292,54 @@ Section `[abonnement]` de `config.toml` :
   relevé des parents : tous les parents reçoivent leurs messages, sans limite de date. Le suivi
   des tranches payées par l'école se fait en dehors du logiciel.
 
-## Brancher WhatsApp (Twilio)
+## Brancher WhatsApp (API Cloud de Meta)
 
-**Pour tester (bac à sable, gratuit) :**
-1. Crée un compte sur https://www.twilio.com et récupère l'Account SID et l'Auth Token.
-2. Console Twilio → Messaging → Try it out → WhatsApp : chaque téléphone de test doit envoyer
-   le code `join ...` indiqué au numéro du bac à sable.
-3. Remplis `.env` (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`) et mets `mode = "twilio"` dans `config.toml`.
-   **Dans une école**, n'utilise jamais `TWILIO_AUTH_TOKEN` : crée une clé d'API par école
-   (Console Twilio > Account > API keys & tokens, type « Standard ») et remplis
-   `TWILIO_API_KEY_SID` et `TWILIO_API_KEY_SECRET` à la place. Si le PC d'une école est
-   compromis, tu révoques sa seule clé sans exposer ton compte ni les autres écoles.
+Les messages partent directement chez Meta, sans intermédiaire : on ne paie que le tarif
+WhatsApp (message « utilitaire », environ 2 à 3 FCFA au Sénégal, à vérifier sur la grille
+officielle de Meta).
+
+**Pour tester (numéro de test de Meta, gratuit) :**
+1. Crée un portefeuille business sur https://business.facebook.com, puis un compte
+   développeur sur https://developers.facebook.com.
+2. « Créer une app » → cas d'usage « Se connecter avec les clients via WhatsApp ».
+3. Page **WhatsApp > API Setup** : ajoute ton téléphone dans « To » (5 numéros au plus),
+   puis recopie dans `.env` le jeton (`META_JETON`, valable 24 h) et le
+   « Phone number ID » (`META_ID_NUMERO`).
+4. `pt test-whatsapp TON_NUMERO --hello` : tu dois recevoir « Hello World ».
+5. Pour une démo avec de vraies alertes **avant** l'approbation des modèles : écris
+   « Bonjour » au numéro de test depuis le téléphone de démo, mets `texte_libre = true`
+   et `mode = "meta"` dans `config.toml`. Pendant 24 h, ce téléphone reçoit les alertes
+   en texte libre.
 
 **Pour la production (de vrais parents) :**
-WhatsApp interdit d'écrire en texte libre à quelqu'un qui ne vous a pas écrit dans les
+WhatsApp interdit le texte libre à quelqu'un qui n'a pas écrit au numéro dans les
 dernières 24 h. Il faut :
-1. Un **numéro WhatsApp Business** enregistré via Twilio (vérification de l'entreprise par Meta).
-2. Un **modèle de message** (Content Template) de catégorie « Utility », approuvé par Meta, avec 4 variables :
-   `{{1}} : {{2}} {{3}} à {{4}}.` (école, élève, événement, heure).
-   Exemple de rendu : *Groupe Scolaire Exemple : Awa Diop est arrivé(e) à l'école à 07h42.*
-3. Son identifiant (commence par `HX`) dans `.env` → `TWILIO_CONTENT_SID`.
+1. **Un numéro dédié** (une puce jamais utilisée sur l'application WhatsApp), ajouté dans
+   WhatsApp Manager, avec le nom affiché « ARIA_point ».
+2. **Un moyen de paiement** (carte Visa ou Mastercard) dans WhatsApp Manager.
+3. **Quatre modèles de message**, catégorie « Utilitaire », langue « Français », à créer
+   dans WhatsApp Manager > Modèles. Noms et textes (les noms doivent correspondre à
+   `[notifications.modeles_meta]` dans `config.toml`) :
 
-À savoir : « envoyé » signifie « accepté par Twilio ». La confirmation de lecture n'est pas suivie dans cette version.
+   | Nom | Texte |
+   |---|---|
+   | `aria_arrivee` | Bonjour, ici {{1}}. Votre enfant {{2}} est arrivé(e) à l'école à {{3}}. Message automatique ARIA_point. |
+   | `aria_retard` | Bonjour, ici {{1}}. Votre enfant {{2}} est arrivé(e) en retard à l'école à {{3}}. Message automatique ARIA_point. |
+   | `aria_sortie` | Bonjour, ici {{1}}. Votre enfant {{2}} a quitté l'école à {{3}}. Message automatique ARIA_point. |
+   | `aria_absence` | Bonjour, ici {{1}}. Votre enfant {{2}} n'avait pas pointé à l'école à {{3}}. En cas d'erreur ou d'absence prévue, merci de contacter l'école. Message automatique ARIA_point. |
+
+   Exemples à donner à Meta : {{1}} = `Groupe Scolaire Exemple`, {{2}} = `Awa Diop (6e A)`,
+   {{3}} = `07h42`.
+4. **Un jeton permanent** : business.facebook.com > Paramètres > Utilisateurs système >
+   Ajouter (rôle Admin), lui donner l'app et le compte WhatsApp, puis « Générer un jeton »
+   avec les autorisations `whatsapp_business_messaging` et `whatsapp_business_management`.
+   À mettre dans `META_JETON`. Si un PC d'école est volé : même page, « Révoquer le jeton ».
+5. **La vérification de l'entreprise** (RCCM, NINEA d'ARIA_tech) : sans elle, Meta limite
+   l'envoi à 250 destinataires différents par 24 h, pour toutes les écoles réunies.
+6. **Le consentement écrit des parents** à recevoir les alertes WhatsApp (exigé par WhatsApp).
+
+À savoir : « envoyé » signifie « accepté par Meta ». La livraison et la lecture ne sont pas
+suivies dans cette version (il faudrait un serveur joignable depuis internet).
 
 ## Lancer le service automatiquement au démarrage du PC
 
@@ -376,7 +402,7 @@ pointage/device.py       vraie pointeuse (pyzk) et pointeuse simulée
 pointage/collector.py    lecture, anti-doublon, classement arrivée/sortie/retard
 pointage/eleves.py       fiches élèves, import CSV, numéros de téléphone
 pointage/subscriptions.py essai gratuit, paiements, abonnement actif ou non
-pointage/notifier.py     file d'attente et envoi WhatsApp (Twilio ou console)
+pointage/notifier.py     file d'attente et envoi WhatsApp (API Cloud de Meta, ou console)
 pointage/backup.py       sauvegardes et rotation
 pointage/purge.py        vidage sécurisé de la mémoire du boîtier
 pointage/reports.py      statistiques mensuelles et PDF

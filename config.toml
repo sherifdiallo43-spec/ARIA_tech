@@ -62,8 +62,7 @@ journalier_apres = "18:00"   # le rapport du jour est généré à partir de cet
 
 [notifications]
 # "console" : les messages s'affichent à l'écran (tests, démos)
-# "twilio"  : envoi réel par WhatsApp (identifiants dans .env)
-# "twilio_sms" : envoi par SMS via Twilio (texte libre, pas de modèle à approuver)
+# "meta"    : envoi réel par WhatsApp, via l'API Cloud de Meta (jeton dans .env)
 mode = "console"
 age_max_minutes = 120   # au-delà, un pointage récupéré en retard n'est plus notifié
 max_tentatives = 10     # après 10 échecs, le message est abandonné
@@ -78,6 +77,19 @@ absence_apres = "09:00"              # heure du constat d'absence (lundi au same
 # Sécurité : aucune alerte d'absence si moins de 50 % des élèves ont pointé
 # (jour férié, grève, panne au portail...) ou si une pointeuse n'a pas répondu.
 absence_min_presents_pourcent = 50
+# --- WhatsApp (mode "meta") ---
+langue_meta = "fr"   # langue sous laquelle les modèles ont été approuvés
+# true : envoie le texte tel quel, sans modèle. Seulement pour les démos : WhatsApp ne
+# le livre que si le téléphone a écrit au numéro dans les dernières 24 h.
+texte_libre = false
+
+# Noms des modèles approuvés dans WhatsApp Manager, un par type d'alerte. Chacun a
+# 3 variables : {{1}} école, {{2}} élève et classe, {{3}} heure (textes : voir README).
+[notifications.modeles_meta]
+arrivee = "aria_arrivee"
+retard = "aria_retard"
+sortie = "aria_sortie"
+absence = "aria_absence"
 
 [sauvegarde]
 retention_jours = 30    # les sauvegardes plus anciennes sont supprimées

@@ -2,7 +2,7 @@
 
 Deux sources séparées volontairement :
 - config.toml : les réglages de l'école (horaires, prix, chemins). Pas secret.
-- .env        : les secrets (identifiants Twilio, mot de passe de la pointeuse).
+- .env        : les secrets (jeton WhatsApp de Meta, mot de passe de la pointeuse).
                 Jamais versionné, jamais partagé.
 """
 from __future__ import annotations
@@ -16,13 +16,9 @@ from pathlib import Path
 RACINE_PROJET = Path(__file__).resolve().parent.parent
 
 CLES_SECRETES = (
-    "TWILIO_ACCOUNT_SID",
-    "TWILIO_AUTH_TOKEN",
-    "TWILIO_API_KEY_SID",
-    "TWILIO_API_KEY_SECRET",
-    "TWILIO_WHATSAPP_FROM",
-    "TWILIO_CONTENT_SID",
-    "TWILIO_SMS_FROM",
+    "META_JETON",
+    "META_ID_NUMERO",
+    "META_API_VERSION",
     "ZK_MOT_DE_PASSE",
     "DASHBOARD_PASSWORD",
     "SMTP_HOTE",

@@ -247,7 +247,7 @@ class ReleveMois:
     revenus: int
     part_pourcent: int
     montant_du: int
-    messages_envoyes: int           # pour estimer la facture Twilio
+    messages_envoyes: int           # pour estimer la facture WhatsApp (Meta)
     a_relancer: list[dict]          # abonnement expiré : nom, classe, tel, fin
 
 
@@ -536,7 +536,7 @@ def generer_pdf_releve(releve: ReleveMois, nom_ecole: str, chemin: Path,
         ["Total encaissé", _fcfa(releve.revenus)],
         [(f"Montant dû au prestataire ({releve.part_pourcent} %)", _style(NUIT)),
          (_fcfa(releve.montant_du), _style(VERT))],
-        ["Messages WhatsApp envoyés (coût Twilio)", releve.messages_envoyes],
+        ["Messages WhatsApp envoyés (facturés par Meta)", releve.messages_envoyes],
     ], (120, 60))
     pdf.ln(4)
 

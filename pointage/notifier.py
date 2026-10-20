@@ -19,6 +19,8 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import urllib.error
+import urllib.request
 from datetime import datetime, timedelta
 
 from .config import Config, lire_heure
@@ -50,12 +52,17 @@ class ErreurDefinitive(Exception):
 
 def composer_message(eleve: sqlite3.Row, type_: str, horodatage: datetime, en_retard: bool,
                      nom_ecole: str) -> tuple[str, dict]:
-    """Renvoie le texte du message et les variables pour un modèle Twilio."""
+    """Renvoie le texte du message et les variables du modèle WhatsApp.
+
+    Meta n'accepte qu'un modèle au texte fixe, approuvé à l'avance : un modèle par
+    type d'alerte ("modele"), avec 3 variables : école, élève et classe, heure.
+    """
     heure = horodatage.strftime("%Hh%M")
     evenement = EVENEMENTS[type_] + (" (en retard)" if en_retard else "")
-    eleve_txt = f"{eleve['prenom']} {eleve['nom']}"
-    message = f"{nom_ecole} : {eleve_txt} ({eleve['classe']}) {evenement} à {heure}."
-    variables = {"1": nom_ecole, "2": eleve_txt, "3": evenement, "4": heure}
+    eleve_txt = f"{eleve['prenom']} {eleve['nom']} ({eleve['classe']})"
+    message = f"{nom_ecole} : {eleve_txt} {evenement} à {heure}."
+    modele = "retard" if type_ == "arrivee" and en_retard else type_
+    variables = {"modele": modele, "1": nom_ecole, "2": eleve_txt, "3": heure}
     return message, variables
 
 
@@ -183,90 +190,100 @@ class EnvoyeurConsole:
         print(f"[WhatsApp -> {tel}] {message}", flush=True)
 
 
-def _creer_message_twilio(client, **parametres) -> None:
-    """Envoie via Twilio et classe l'erreur : à réessayer plus tard, ou définitive."""
-    from twilio.base.exceptions import TwilioRestException
+# Version de l'API Graph de Meta. Chaque version reste utilisable environ 2 ans ;
+# META_API_VERSION dans .env permet d'en changer sans toucher au code.
+VERSION_API_META = "v25.0"
 
+# Noms des modèles approuvés dans WhatsApp Manager, si config.toml n'en donne pas.
+MODELES_META = {"arrivee": "aria_arrivee", "retard": "aria_retard",
+                "sortie": "aria_sortie", "absence": "aria_absence"}
+
+# Erreurs Meta qui se règlent en attendant : panne passagère, limites de débit, et
+# jeton expiré (les messages restent en file le temps de le renouveler dans .env).
+CODES_META_TEMPORAIRES = {1, 2, 4, 17, 190, 80007, 130429, 131000, 131016, 131048, 131056, 133016}
+
+
+def _erreur_meta(statut_http: int, corps: bytes) -> Exception:
+    """Classe une réponse d'erreur de Meta : à réessayer plus tard, ou définitive."""
     try:
-        client.messages.create(**parametres)
-    except TwilioRestException as e:
-        # 4xx = la requête elle-même est mauvaise (numéro invalide...), sauf
-        # 429 (trop de requêtes) qui se règle en attendant.
-        if 400 <= e.status < 500 and e.status != 429:
-            raise ErreurDefinitive(f"Twilio {e.code} : {e.msg}") from e
-        raise ErreurTemporaire(f"Twilio {e.code} : {e.msg}") from e
-    except Exception as e:  # coupure réseau, DNS, délai dépassé...
-        raise ErreurTemporaire(str(e)) from e
+        erreur = json.loads(corps.decode("utf-8")).get("error") or {}
+        code = erreur.get("code")
+        detail = (erreur.get("error_data") or {}).get("details") or erreur.get("message")
+    except (ValueError, UnicodeDecodeError, AttributeError):
+        code, detail = None, None
+    texte = f"Meta {code or statut_http} : {detail or f'HTTP {statut_http}'}"
+    if statut_http >= 500 or statut_http == 429 or code in CODES_META_TEMPORAIRES:
+        return ErreurTemporaire(texte)
+    # 4xx : la requête elle-même est mauvaise (numéro invalide, modèle inconnu...).
+    return ErreurDefinitive(texte)
 
 
-def _client_twilio(account_sid: str, auth_token: str, api_key: str = "", api_secret: str = ""):
-    """Client Twilio, de préférence avec une clé d'API propre à l'école.
+class EnvoyeurMeta:
+    """Envoi réel par WhatsApp, directement par l'API Cloud de Meta (sans intermédiaire).
 
-    Le jeton principal (auth token) donne tout le compte : envois, historique
-    des messages de TOUTES les écoles, facturation. Une clé d'API par école se
-    révoque seule si le PC de cette école est compromis, sans toucher aux autres.
+    WhatsApp interdit le texte libre à quelqu'un qui n'a pas écrit au numéro dans les
+    dernières 24 h : en production, chaque alerte part avec son modèle approuvé.
+    `texte_libre` sert aux démos (le téléphone de démo écrit d'abord au numéro).
+    "Envoyé" veut dire "accepté par Meta", pas "lu" : la lecture n'est pas suivie.
     """
-    from twilio.rest import Client
 
-    if api_key and api_secret:
-        return Client(api_key, api_secret, account_sid)
-    return Client(account_sid, auth_token)
-
-
-class EnvoyeurTwilioSMS:
-    """Envoi par SMS via Twilio (texte libre, aucun modèle à faire approuver)."""
-
-    def __init__(self, account_sid: str, auth_token: str, expediteur: str,
-                 api_key: str = "", api_secret: str = ""):
-        self.client = _client_twilio(account_sid, auth_token, api_key, api_secret)
-        self.expediteur = expediteur
+    def __init__(self, jeton: str, id_numero: str, modeles: dict | None = None, langue: str = "fr",
+                 texte_libre: bool = False, version: str = VERSION_API_META, delai_s: int = 15):
+        self.jeton = jeton
+        self.url = f"https://graph.facebook.com/{version}/{id_numero}/messages"
+        self.modeles = modeles or MODELES_META
+        self.langue = langue
+        self.texte_libre = texte_libre
+        self.delai_s = delai_s
 
     def envoyer(self, tel: str, message: str, variables: dict) -> None:
-        _creer_message_twilio(self.client, from_=self.expediteur, to=tel, body=message)
+        if self.texte_libre:
+            self._poster(tel, {"type": "text", "text": {"body": message}})
+            return
+        nom = self.modeles.get(variables.get("modele", ""))
+        if not nom:
+            raise ErreurDefinitive(f"aucun modèle Meta pour l'alerte {variables.get('modele')!r} "
+                                   "([notifications.modeles_meta] dans config.toml)")
+        self.envoyer_modele(tel, nom, self.langue, [variables["1"], variables["2"], variables["3"]])
 
+    def envoyer_modele(self, tel: str, nom: str, langue: str, parametres: list[str] = ()) -> None:
+        modele = {"name": nom, "language": {"code": langue}}
+        if parametres:
+            modele["components"] = [{"type": "body", "parameters": [
+                {"type": "text", "text": p} for p in parametres]}]
+        self._poster(tel, {"type": "template", "template": modele})
 
-class EnvoyeurTwilio:
-    """Envoi réel par WhatsApp via Twilio."""
-
-    def __init__(self, account_sid: str, auth_token: str, expediteur: str, content_sid: str = "",
-                 api_key: str = "", api_secret: str = ""):
-        self.client = _client_twilio(account_sid, auth_token, api_key, api_secret)
-        self.expediteur = expediteur if expediteur.startswith("whatsapp:") else f"whatsapp:{expediteur}"
-        self.content_sid = content_sid
-
-    def envoyer(self, tel: str, message: str, variables: dict) -> None:
-        parametres = {"from_": self.expediteur, "to": f"whatsapp:{tel}"}
-        if self.content_sid:
-            # Production : modèle de message approuvé par Meta, avec ses variables.
-            parametres["content_sid"] = self.content_sid
-            parametres["content_variables"] = json.dumps(variables, ensure_ascii=False)
-        else:
-            # Bac à sable : texte libre.
-            parametres["body"] = message
-        _creer_message_twilio(self.client, **parametres)
+    def _poster(self, tel: str, contenu: dict) -> None:
+        corps = {"messaging_product": "whatsapp", "to": tel.lstrip("+"), **contenu}
+        requete = urllib.request.Request(
+            self.url, data=json.dumps(corps, ensure_ascii=False).encode("utf-8"), method="POST",
+            headers={"Authorization": f"Bearer {self.jeton}", "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(requete, timeout=self.delai_s) as reponse:
+                reponse.read()
+        except urllib.error.HTTPError as e:  # avant URLError, dont elle hérite
+            raise _erreur_meta(e.code, e.read()) from e
+        except OSError as e:  # pas d'internet, DNS, délai dépassé (URLError en fait partie)
+            raise ErreurTemporaire(f"réseau : {e}") from e
 
 
 def creer_envoyeur(config: Config):
-    mode = config.notifications["mode"]
+    reglages = config.notifications
+    mode = reglages["mode"]
     if mode == "console":
         return EnvoyeurConsole()
-    if mode in ("twilio", "twilio_sms"):
+    if mode == "meta":
         s = config.secrets
-        expediteur = "TWILIO_WHATSAPP_FROM" if mode == "twilio" else "TWILIO_SMS_FROM"
-        manquants = [c for c in ("TWILIO_ACCOUNT_SID", expediteur) if not s.get(c)]
-        avec_cle = s.get("TWILIO_API_KEY_SID") and s.get("TWILIO_API_KEY_SECRET")
-        if not avec_cle and not s.get("TWILIO_AUTH_TOKEN"):
-            manquants.append("TWILIO_API_KEY_SID + TWILIO_API_KEY_SECRET (ou TWILIO_AUTH_TOKEN)")
+        manquants = [c for c in ("META_JETON", "META_ID_NUMERO") if not s.get(c)]
         if manquants:
-            raise ValueError(f"Mode {mode} : à remplir dans .env : {', '.join(manquants)}")
-        identifiants = {"api_key": s.get("TWILIO_API_KEY_SID", ""),
-                        "api_secret": s.get("TWILIO_API_KEY_SECRET", "")}
-        if mode == "twilio":
-            return EnvoyeurTwilio(s["TWILIO_ACCOUNT_SID"], s.get("TWILIO_AUTH_TOKEN", ""),
-                                  s[expediteur], s.get("TWILIO_CONTENT_SID", ""), **identifiants)
-        return EnvoyeurTwilioSMS(s["TWILIO_ACCOUNT_SID"], s.get("TWILIO_AUTH_TOKEN", ""),
-                                 s[expediteur], **identifiants)
-    raise ValueError(f"Mode de notification inconnu : {mode!r} (attendu : 'console', 'twilio' ou 'twilio_sms')")
+            raise ValueError(f"Mode meta : à remplir dans .env : {', '.join(manquants)}")
+        return EnvoyeurMeta(s["META_JETON"], s["META_ID_NUMERO"],
+                            {**MODELES_META, **reglages.get("modeles_meta", {})},
+                            langue=reglages.get("langue_meta", "fr"),
+                            texte_libre=bool(reglages.get("texte_libre", False)),
+                            version=s.get("META_API_VERSION") or VERSION_API_META)
+    conseil = " Twilio n'est plus pris en charge : mets mode = \"meta\"." if mode.startswith("twilio") else ""
+    raise ValueError(f"Mode de notification inconnu : {mode!r} (attendu : 'console' ou 'meta').{conseil}")
 
 
 def envoyer_en_attente(conn: sqlite3.Connection, envoyeur, config: Config,

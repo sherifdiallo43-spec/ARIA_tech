@@ -1,5 +1,4 @@
 pyzk>=0.9          # communication avec la pointeuse ZKTeco
-twilio>=9.0        # envoi des messages WhatsApp
 fpdf2>=2.7.9       # génération des rapports PDF
 python-dotenv>=1.0 # lecture du fichier .env
 schedule>=1.2      # tâches répétées (lecture toutes les 30 s, sauvegarde quotidienne)
