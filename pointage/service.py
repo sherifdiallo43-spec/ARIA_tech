@@ -38,6 +38,10 @@ def lancer(config: Config) -> None:
         except Exception as e:
             log.warning("Lecture de la pointeuse impossible (%s). Nouvel essai dans %d s.", e, intervalle)
         try:
+            notifier.creer_alertes_absence(conn, config)
+        except Exception:
+            log.exception("Erreur pendant la préparation des alertes d'absence.")
+        try:
             notifier.envoyer_en_attente(conn, envoyeur, config)
         except Exception:
             log.exception("Erreur pendant l'envoi des messages.")

@@ -78,9 +78,14 @@ CREATE INDEX IF NOT EXISTS idx_pointages_horodatage ON pointages(horodatage);
 
 -- File d'attente des messages WhatsApp. Un message reste "en_attente" tant
 -- qu'il n'a pas pu partir (coupure internet), puis passe à "envoye" ou "echec".
+-- Une alerte d'absence n'a pas de pointage (pointage_id vide) : c'est pourquoi
+-- l'élève, le moment et le type sont gardés dans la notification elle-même.
 CREATE TABLE IF NOT EXISTS notifications (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    pointage_id INTEGER NOT NULL REFERENCES pointages(id),
+    pointage_id INTEGER REFERENCES pointages(id),  -- NULL pour une alerte d'absence
+    zk_user_id  TEXT    NOT NULL,
+    moment      TEXT    NOT NULL,  -- heure annoncée : celle du pointage, ou du constat d'absence
+    type        TEXT    NOT NULL,  -- arrivee, sortie ou absence
     tel         TEXT    NOT NULL,
     message     TEXT    NOT NULL,
     variables   TEXT    NOT NULL,  -- JSON, pour les modèles de message Twilio
@@ -91,6 +96,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     envoye_le   TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_notifications_statut ON notifications(statut);
+CREATE INDEX IF NOT EXISTS idx_notifications_eleve ON notifications(zk_user_id, moment);
 
 -- Petites valeurs de fonctionnement (dernière synchro, dernière sauvegarde...).
 CREATE TABLE IF NOT EXISTS etat (
@@ -113,9 +119,28 @@ def connecter(chemin: Path | str) -> sqlite3.Connection:
 
 
 def initialiser(conn: sqlite3.Connection) -> None:
-    """Crée les tables manquantes. Sans effet sur une base déjà créée."""
+    """Crée les tables manquantes et met à jour une base d'une version précédente."""
+    colonnes = _colonnes(conn, "notifications")
+    ancienne = bool(colonnes) and "moment" not in colonnes
+    if ancienne:
+        # SQLite ne sait pas rendre une colonne facultative : on met l'ancienne table
+        # de côté, on crée la nouvelle (executescript ci-dessous), puis on recopie.
+        conn.execute("ALTER TABLE notifications RENAME TO notifications_v1")
+        conn.execute("DROP INDEX IF EXISTS idx_notifications_statut")
     conn.executescript(SCHEMA)
+    if ancienne:
+        conn.execute(
+            "INSERT INTO notifications (id, pointage_id, zk_user_id, moment, type, tel, message, "
+            "  variables, statut, tentatives, erreur, cree_le, envoye_le) "
+            "SELECT n.id, n.pointage_id, p.zk_user_id, p.horodatage, p.type, n.tel, n.message, "
+            "  n.variables, n.statut, n.tentatives, n.erreur, n.cree_le, n.envoye_le "
+            "FROM notifications_v1 n JOIN pointages p ON p.id = n.pointage_id")
+        conn.execute("DROP TABLE notifications_v1")
     conn.commit()
+
+
+def _colonnes(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
 
 
 def dt_texte(moment: datetime) -> str:

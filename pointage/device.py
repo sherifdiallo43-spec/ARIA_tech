@@ -213,13 +213,16 @@ class MultiPointeuse:
 
     def __init__(self, pointeuses: list[ZKPointeuse]):
         self.pointeuses = pointeuses
+        self.lecture_complete = False  # vrai si TOUS les boîtiers ont répondu à la dernière lecture
 
     def lire_pointages(self) -> list[PointageBrut]:
         tous = []
+        self.lecture_complete = True
         for p in self.pointeuses:
             try:
                 tous.extend(p.lire_pointages())
             except Exception as e:
+                self.lecture_complete = False
                 log.warning("Pointeuse %s injoignable (%s), passage à la suivante.", p.ip, e)
         return tous
 

@@ -35,6 +35,25 @@ def abonnement_actif(eleve: sqlite3.Row, jour: date) -> bool:
     return jour <= fin_couverture(eleve)
 
 
+def au_forfait(reglages: dict) -> bool:
+    """Vrai si l'école paie un forfait pour tous ses élèves (section [abonnement])."""
+    mode = reglages.get("paiement", "parents")
+    if mode not in ("parents", "forfait"):
+        raise ValueError(f"paiement = {mode!r} dans config.toml (attendu : 'parents' ou 'forfait')")
+    return mode == "forfait"
+
+
+def alertes_autorisees(eleve: sqlite3.Row, jour: date, reglages: dict) -> bool:
+    """Le parent de cet élève peut-il recevoir des alertes ce jour-là ?
+
+    - "parents" : chaque parent paie son abonnement (essai gratuit, puis paiements).
+    - "forfait" : l'école paie pour tous les élèves, toujours autorisé. Aucun paiement
+      n'est enregistré élève par élève : sans ce cas, tous les messages s'arrêteraient
+      à la fin de l'essai gratuit.
+    """
+    return au_forfait(reglages) or abonnement_actif(eleve, jour)
+
+
 def statut_abonnement(eleve: sqlite3.Row, jour: date) -> str:
     """"actif" (payé), "essai" (gratuit) ou "expire"."""
     if eleve["abonnement_fin"] and jour <= texte_d(eleve["abonnement_fin"]):

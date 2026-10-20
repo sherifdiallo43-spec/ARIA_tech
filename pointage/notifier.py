@@ -3,8 +3,16 @@
 Deux étapes bien séparées :
 1. creer_notification : à chaque pointage, on décide s'il faut prévenir le
    parent et on range le message dans la table `notifications`.
+   creer_alertes_absence : une fois par jour, après `absence_apres`, on range
+   une alerte pour chaque élève qui n'a pas pointé.
 2. envoyer_en_attente : on envoie ce qui attend. Sans internet, les messages
    restent en attente et partent au cycle suivant. Rien n'est perdu.
+
+Ce qui est envoyé dépend de `types_notifies` dans config.toml :
+- "arrivee", "sortie" : à chaque passage (formule Complet) ;
+- "retard"            : seulement les arrivées en retard ;
+- "absence"           : les élèves qui n'ont pas pointé à `absence_apres`.
+La formule Essentiel = ["retard", "absence"].
 """
 from __future__ import annotations
 
@@ -13,16 +21,21 @@ import logging
 import sqlite3
 from datetime import datetime, timedelta
 
-from .config import Config
-from .db import dt_texte, texte_dt
-from .subscriptions import abonnement_actif
+from .config import Config, lire_heure
+from .db import dt_texte, ecrire_etat, lire_etat, texte_dt
+from .subscriptions import alertes_autorisees
 
 log = logging.getLogger(__name__)
 
 EVENEMENTS = {
     "arrivee": "est arrivé(e) à l'école",
     "sortie": "a quitté l'école",
+    "absence": "n'avait pas pointé à l'école",
 }
+
+# Fraîcheur exigée de la dernière lecture COMPLÈTE des pointeuses avant d'annoncer
+# une absence : sinon, un élève présent mais pas encore lu passerait pour absent.
+LECTURE_RECENTE = timedelta(minutes=5)
 
 
 class ErreurTemporaire(Exception):
@@ -50,14 +63,40 @@ def _deja_notifie_ce_jour(conn: sqlite3.Connection, zk_user_id: str, type_: str,
                           horodatage: datetime) -> bool:
     """Au plus une alerte par élève, par type et par jour (économise les messages payants)."""
     return conn.execute(
-        "SELECT 1 FROM notifications n JOIN pointages p ON p.id = n.pointage_id "
-        "WHERE p.zk_user_id = ? AND p.type = ? AND substr(p.horodatage, 1, 10) = ?",
+        "SELECT 1 FROM notifications WHERE zk_user_id = ? AND type = ? AND substr(moment, 1, 10) = ?",
         (zk_user_id, type_, horodatage.date().isoformat()),
     ).fetchone() is not None
 
 
+def _age_max(config: Config) -> timedelta:
+    return timedelta(minutes=config.notifications["age_max_minutes"])
+
+
 def _trop_ancien(horodatage: datetime, maintenant: datetime, config: Config) -> bool:
-    return maintenant - horodatage > timedelta(minutes=config.notifications["age_max_minutes"])
+    return maintenant - horodatage > _age_max(config)
+
+
+def _ranger(conn: sqlite3.Connection, eleve: sqlite3.Row, pointage_id: int | None, type_: str,
+            moment: datetime, en_retard: bool, config: Config, maintenant: datetime) -> str:
+    """Range une alerte dans la file et renvoie son statut. L'appelant fait le commit.
+
+    On garde aussi une trace des alertes NON envoyées : le rapport mensuel
+    montre ainsi combien de parents ont raté des alertes faute d'abonnement.
+    """
+    if not alertes_autorisees(eleve, moment.date(), config.abonnement):
+        statut = "ignore_abonnement"
+    elif _trop_ancien(moment, maintenant, config):
+        statut = "ignore_trop_ancien"
+    else:
+        statut = "en_attente"
+    message, variables = composer_message(eleve, type_, moment, en_retard, config.nom_ecole)
+    conn.execute(
+        "INSERT INTO notifications (pointage_id, zk_user_id, moment, type, tel, message, variables, "
+        "  statut, cree_le) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (pointage_id, eleve["zk_user_id"], dt_texte(moment), type_, eleve["tel_parent"], message,
+         json.dumps(variables, ensure_ascii=False), statut, dt_texte(maintenant)),
+    )
+    return statut
 
 
 def creer_notification(conn: sqlite3.Connection, pointage_id: int, zk_user_id: str,
@@ -65,31 +104,74 @@ def creer_notification(conn: sqlite3.Connection, pointage_id: int, zk_user_id: s
                        maintenant: datetime) -> str | None:
     """Range l'alerte d'un pointage dans la file. Renvoie son statut, ou None si
     aucune alerte n'est prévue. L'appelant fait le commit."""
-    if type_ not in config.notifications["types_notifies"]:
+    types = config.notifications["types_notifies"]
+    # "retard" : seules les arrivées en retard sont annoncées (formule Essentiel).
+    if not (type_ in types or (type_ == "arrivee" and en_retard and "retard" in types)):
         return None
     eleve = conn.execute("SELECT * FROM eleves WHERE zk_user_id = ?", (zk_user_id,)).fetchone()
     if eleve is None or not eleve["actif_scolarite"]:
         return None  # empreinte d'un adulte, ou pas encore associée à un élève
     if _deja_notifie_ce_jour(conn, zk_user_id, type_, horodatage):
         return None
+    return _ranger(conn, eleve, pointage_id, type_, horodatage, en_retard, config, maintenant)
 
-    # On garde aussi une trace des alertes NON envoyées : le rapport mensuel
-    # montre ainsi combien de parents ont raté des alertes faute d'abonnement.
-    if not abonnement_actif(eleve, horodatage.date()):
-        statut = "ignore_abonnement"
-    elif _trop_ancien(horodatage, maintenant, config):
-        statut = "ignore_trop_ancien"
-    else:
-        statut = "en_attente"
 
-    message, variables = composer_message(eleve, type_, horodatage, en_retard, config.nom_ecole)
-    conn.execute(
-        "INSERT INTO notifications (pointage_id, tel, message, variables, statut, cree_le) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (pointage_id, eleve["tel_parent"], message, json.dumps(variables, ensure_ascii=False),
-         statut, dt_texte(maintenant)),
-    )
-    return statut
+def creer_alertes_absence(conn: sqlite3.Connection, config: Config,
+                          maintenant: datetime | None = None) -> int:
+    """Range une alerte pour chaque élève qui n'a pas pointé à `absence_apres`.
+
+    Annoncer à tort une absence à des centaines de parents serait grave. On ne
+    le fait donc que si tout indique une vraie journée de classe, bien lue :
+    - du lundi au samedi, entre `absence_apres` et `absence_apres` + age_max_minutes ;
+    - toutes les pointeuses lues il y a moins de 5 minutes (une pointeuse en panne
+      ferait passer pour absents tous les élèves qui y ont pointé) ;
+    - au moins `absence_min_presents_pourcent` des élèves présents (sinon : jour
+      férié, grève, coupure de courant au portail... on ne dit rien).
+    Renvoie le nombre d'alertes rangées. Rappelée toutes les 30 s, elle ne crée
+    jamais deux fois la même alerte.
+    """
+    reglages = config.notifications
+    if "absence" not in reglages["types_notifies"]:
+        return 0
+    maintenant = maintenant or datetime.now()
+    jour = maintenant.date()
+    constat = datetime.combine(jour, lire_heure(reglages.get("absence_apres", "09:00")))
+    if jour.weekday() == 6 or not constat <= maintenant < constat + _age_max(config):
+        return 0
+
+    lecture = lire_etat(conn, "derniere_lecture_complete")
+    if not lecture or maintenant - texte_dt(lecture) > LECTURE_RECENTE:
+        _avertir_une_fois(conn, jour, "pointeuses pas toutes lues récemment")
+        return 0
+
+    eleves = conn.execute("SELECT * FROM eleves WHERE actif_scolarite = 1 AND date_inscription <= ?",
+                          (jour.isoformat(),)).fetchall()
+    ont_pointe = {r[0] for r in conn.execute(
+        "SELECT DISTINCT zk_user_id FROM pointages WHERE substr(horodatage, 1, 10) = ?",
+        (jour.isoformat(),))}
+    absents = [e for e in eleves if e["zk_user_id"] not in ont_pointe]
+    seuil = int(reglages.get("absence_min_presents_pourcent", 50))
+    if not eleves or (len(eleves) - len(absents)) * 100 < seuil * len(eleves):
+        _avertir_une_fois(conn, jour, f"moins de {seuil} % des élèves ont pointé")
+        return 0
+
+    ranges = 0
+    for e in absents:
+        if not _deja_notifie_ce_jour(conn, e["zk_user_id"], "absence", constat):
+            _ranger(conn, e, None, "absence", constat, False, config, maintenant)
+            ranges += 1
+    conn.commit()
+    if ranges:
+        log.info("%d alerte(s) d'absence préparée(s).", ranges)
+    return ranges
+
+
+def _avertir_une_fois(conn: sqlite3.Connection, jour, raison: str) -> None:
+    """Un seul avertissement par jour dans le journal, pas un toutes les 30 s."""
+    if lire_etat(conn, "absences_bloquees_le") != jour.isoformat():
+        log.warning("Alertes d'absence NON envoyées aujourd'hui pour l'instant : %s.", raison)
+        ecrire_etat(conn, "absences_bloquees_le", jour.isoformat())
+        conn.commit()
 
 
 # --- Étape 2 : envoyer ---------------------------------------------------------
@@ -195,13 +277,12 @@ def envoyer_en_attente(conn: sqlite3.Connection, envoyeur, config: Config,
     compte = {"envoye": 0, "echec": 0, "ignore_trop_ancien": 0, "reporte": 0}
 
     en_attente = conn.execute(
-        "SELECT n.id, n.tel, n.message, n.variables, n.tentatives, p.horodatage "
-        "FROM notifications n JOIN pointages p ON p.id = n.pointage_id "
-        "WHERE n.statut = 'en_attente' ORDER BY n.id"
+        "SELECT id, tel, message, variables, tentatives, moment "
+        "FROM notifications WHERE statut = 'en_attente' ORDER BY id"
     ).fetchall()
 
     for notif in en_attente:
-        if _trop_ancien(texte_dt(notif["horodatage"]), maintenant, config):
+        if _trop_ancien(texte_dt(notif["moment"]), maintenant, config):
             # Coupure trop longue : "arrivé à 7h30" reçu à 15h inquiéterait plus qu'il n'aide.
             conn.execute("UPDATE notifications SET statut = 'ignore_trop_ancien' WHERE id = ?",
                          (notif["id"],))

@@ -49,6 +49,10 @@ email = ""          # adresse du directeur
 mode = "console"
 
 [abonnement]
+# Qui paie ?
+#   "parents" : chaque parent paie prix_mensuel (après l'essai gratuit), saisi avec `pt paiement`
+#   "forfait" : l'école paie un forfait pour tous ses élèves, aucun paiement par élève
+paiement = "parents"
 prix_mensuel = 1000   # FCFA
 essai_jours = 30      # durée de l'essai gratuit à l'inscription
 part_prestataire_pourcent = 100   # part des abonnements reversée au prestataire
@@ -63,8 +67,17 @@ journalier_apres = "18:00"   # le rapport du jour est généré à partir de cet
 mode = "console"
 age_max_minutes = 120   # au-delà, un pointage récupéré en retard n'est plus notifié
 max_tentatives = 10     # après 10 échecs, le message est abandonné
-# Retire un type de cette liste pour réduire le nombre de messages (et le coût).
+# Messages envoyés aux parents :
+#   "arrivee", "sortie" : à chaque passage
+#   "retard"            : seulement les arrivées en retard
+#   "absence"           : les élèves qui n'ont pas pointé à l'heure `absence_apres`
+# Formule Complet  : ["arrivee", "sortie", "absence"]
+# Formule Essentiel : ["retard", "absence"]
 types_notifies = ["arrivee", "sortie"]
+absence_apres = "09:00"              # heure du constat d'absence (lundi au samedi)
+# Sécurité : aucune alerte d'absence si moins de 50 % des élèves ont pointé
+# (jour férié, grève, panne au portail...) ou si une pointeuse n'a pas répondu.
+absence_min_presents_pourcent = 50
 
 [sauvegarde]
 retention_jours = 30    # les sauvegardes plus anciennes sont supprimées

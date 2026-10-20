@@ -22,7 +22,7 @@ from pathlib import Path
 from . import personnel
 from .config import Config, lire_heure
 from .db import dt_texte
-from .subscriptions import statut_abonnement
+from .subscriptions import au_forfait, statut_abonnement
 
 log = logging.getLogger(__name__)
 
@@ -75,8 +75,8 @@ def _eleves_inscrits(conn: sqlite3.Connection, au: date) -> list[sqlite3.Row]:
 
 def _notifications(conn: sqlite3.Connection, debut: str, fin: str) -> dict[str, int]:
     return {r[0]: r[1] for r in conn.execute(
-        "SELECT n.statut, COUNT(*) FROM notifications n JOIN pointages p ON p.id = n.pointage_id "
-        "WHERE p.horodatage >= ? AND p.horodatage < ? GROUP BY n.statut", (debut, fin))}
+        "SELECT statut, COUNT(*) FROM notifications "
+        "WHERE moment >= ? AND moment < ? GROUP BY statut", (debut, fin))}
 
 
 def _identite(eleve: sqlite3.Row) -> dict:
@@ -754,7 +754,9 @@ def rapports_automatiques(conn: sqlite3.Connection, config: Config,
     annee, mois = mois_precedent(aujourd_hui)
     if not chemin_rapport(config, annee, mois).exists() and _a_des_pointages(conn, *_bornes_mois(annee, mois)):
         crees.append(generer_rapport(conn, config, annee, mois))
-    if not chemin_releve(config, annee, mois).exists() and _a_des_pointages(conn, *_bornes_mois(annee, mois)):
+    # Au forfait, aucun parent ne paie : un relevé les listerait tous « à relancer ».
+    if (not au_forfait(config.abonnement) and not chemin_releve(config, annee, mois).exists()
+            and _a_des_pointages(conn, *_bornes_mois(annee, mois))):
         crees.append(generer_releve(conn, config, annee, mois))
 
     # Rapports du personnel, seulement si l'école a inscrit du personnel.

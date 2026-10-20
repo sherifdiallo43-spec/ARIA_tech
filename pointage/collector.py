@@ -68,9 +68,14 @@ def _est_rebond(conn: sqlite3.Connection, zk_user_id: str, moment: datetime, del
 def synchroniser(conn: sqlite3.Connection, pointeuse: Pointeuse, config: Config,
                  maintenant: datetime | None = None) -> ResultatSync:
     """Une lecture complète de la pointeuse. Lève une exception si elle est injoignable."""
+    maintenant = maintenant or datetime.now()
     bruts = pointeuse.lire_pointages()
     # Taille de la mémoire du boîtier : sert à décider quand la vider (voir purge.py).
     ecrire_etat(conn, "memoire_pointeuse", str(len(bruts)))
+    # Avec plusieurs boîtiers, une lecture peut réussir alors qu'un boîtier était
+    # injoignable. Les alertes d'absence exigent une lecture où TOUS ont répondu.
+    if getattr(pointeuse, "lecture_complete", True):
+        ecrire_etat(conn, "derniere_lecture_complete", dt_texte(maintenant))
     return enregistrer(conn, bruts, config, maintenant)
 
 

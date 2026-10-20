@@ -13,7 +13,7 @@ from pointage import (archive, backup, collector, courriel, db, eleves, notifier
 from pointage.config import Config, charger
 from pointage.device import (PointeuseSimulee, PointageBrut, creer_pointeuse, generer_journee,
                              generer_journee_personnel, lister_pointeuses_zk)
-from pointage.subscriptions import enregistrer_paiement, statut_abonnement
+from pointage.subscriptions import au_forfait, enregistrer_paiement, statut_abonnement
 
 
 def configurer_logs(config: Config) -> None:
@@ -93,6 +93,8 @@ def cmd_test_email(config, args):
 
 
 def cmd_paiement(config, args):
+    if au_forfait(config.abonnement):
+        sys.exit("Cette école est au forfait (paiement = \"forfait\") : aucun paiement par élève.")
     conn = ouvrir_base(config)
     fin = enregistrer_paiement(conn, args.zk_id, args.mois, config.abonnement["prix_mensuel"],
                                date.today(), montant=args.montant, note=args.note)
@@ -109,6 +111,9 @@ def cmd_sync(config, args):
         # On n'abandonne pas : les messages déjà en attente peuvent quand même partir.
         print(f"Pointeuse injoignable ({type(e).__name__} : {e}). "
               f"Vérifie qu'elle est allumée, son adresse IP dans config.toml et le câble réseau.")
+    absences = notifier.creer_alertes_absence(conn, config)
+    if absences:
+        print(f"Alertes d'absence préparées : {absences}")
     envois = notifier.envoyer_en_attente(conn, notifier.creer_envoyeur(config), config)
     print(f"Messages : {envois}")
 
@@ -166,6 +171,8 @@ def cmd_rapport(config, args):
 
 
 def cmd_releve(config, args):
+    if au_forfait(config.abonnement):
+        sys.exit("Cette école est au forfait : pas de relevé des paiements des parents.")
     conn = ouvrir_base(config)
     if args.mois:
         annee, mois = (int(x) for x in args.mois.split("-"))
@@ -225,8 +232,11 @@ def cmd_statut(config, args):
                                   (aujourd_hui.isoformat(),)).fetchone()[0]
     attente = conn.execute("SELECT COUNT(*) FROM notifications WHERE statut = 'en_attente'").fetchone()[0]
     print(f"École               : {config.nom_ecole}")
-    print(f"Élèves              : {len(liste)} (payé : {statuts['actif']}, essai : {statuts['essai']}, "
-          f"expiré : {statuts['expire']})")
+    if au_forfait(config.abonnement):
+        print(f"Élèves              : {len(liste)} (forfait payé par l'école)")
+    else:
+        print(f"Élèves              : {len(liste)} (payé : {statuts['actif']}, essai : {statuts['essai']}, "
+              f"expiré : {statuts['expire']})")
     print(f"Personnel           : {len(personnel.lister(conn))}")
     print(f"Pointages du jour   : {pointages_jour}")
     print(f"Messages en attente : {attente}")

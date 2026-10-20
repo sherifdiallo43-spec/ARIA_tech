@@ -50,8 +50,7 @@ def archiver_annee(conn: sqlite3.Connection, config: Config, libelle: str, date_
         "personnel": ("SELECT * FROM main.personnel", ()),
         "creneaux": ("SELECT * FROM main.creneaux", ()),
         "pointages": ("SELECT * FROM main.pointages WHERE horodatage < ?", (limite,)),
-        "notifications": ("SELECT * FROM main.notifications WHERE pointage_id IN "
-                          "(SELECT id FROM main.pointages WHERE horodatage < ?)", (limite,)),
+        "notifications": ("SELECT * FROM main.notifications WHERE moment < ?", (limite,)),
         "paiements": ("SELECT * FROM main.paiements WHERE date_paiement < ?", (limite_jour,)),
     }
 
@@ -77,8 +76,7 @@ def archiver_annee(conn: sqlite3.Connection, config: Config, libelle: str, date_
                     for table in selections]
 
     # Les notifications d'abord : elles font référence aux pointages.
-    conn.execute("DELETE FROM main.notifications WHERE pointage_id IN "
-                 "(SELECT id FROM main.pointages WHERE horodatage < ?)", (limite,))
+    conn.execute("DELETE FROM main.notifications WHERE moment < ?", (limite,))
     conn.execute("DELETE FROM main.pointages WHERE horodatage < ?", (limite,))
     conn.execute("DELETE FROM main.paiements WHERE date_paiement < ?", (limite_jour,))
     # La pointeuse garde peut-être encore ces vieux pointages en mémoire :

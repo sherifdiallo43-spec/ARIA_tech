@@ -260,6 +260,38 @@ rien n'est effacé.
 
 Vidage manuel : `pt vider-pointeuse`. La taille actuelle de la mémoire s'affiche avec `pt statut`.
 
+## Quels messages envoyer aux parents (formules)
+
+Dans `config.toml`, section `[notifications]`, la liste `types_notifies` choisit les messages :
+
+| Formule | `types_notifies` | Le parent reçoit un message... |
+|---|---|---|
+| Complet | `["arrivee", "sortie", "absence"]` | à chaque arrivée et sortie, et si l'enfant n'a pas pointé |
+| Essentiel | `["retard", "absence"]` | seulement en cas de retard ou d'absence |
+
+**L'alerte d'absence** part à `absence_apres` (9 h par défaut), du lundi au samedi, pour chaque
+élève qui n'a pas pointé : « Groupe Scolaire X : Awa Diop (6e A) n'avait pas pointé à l'école à
+09h00. » Un élève qui arrive ensuite déclenche en plus le message de retard.
+
+Comme un message d'absence envoyé à tort inquiète beaucoup un parent, **rien ne part** si :
+
+- moins de `absence_min_presents_pourcent` des élèves (50 % par défaut) ont pointé : jour férié,
+  grève, coupure de courant au portail... ;
+- une des pointeuses n'a pas répondu, ou aucune lecture n'a réussi depuis 5 minutes ;
+- il est plus de 9 h + `age_max_minutes` (11 h par défaut) : PC allumé trop tard.
+
+Dans ces cas, le journal (`logs/pointage.log`) l'indique une fois par jour.
+
+## Qui paie : les parents ou l'école (forfait)
+
+Section `[abonnement]` de `config.toml` :
+
+- `paiement = "parents"` : chaque parent paie `prix_mensuel` après l'essai gratuit, saisi avec
+  `pt paiement`. Sans paiement, ses messages s'arrêtent, et le relevé mensuel le liste à relancer.
+- `paiement = "forfait"` : l'école paie pour tous ses élèves. Aucun paiement par élève, pas de
+  relevé des parents : tous les parents reçoivent leurs messages, sans limite de date. Le suivi
+  des tranches payées par l'école se fait en dehors du logiciel.
+
 ## Brancher WhatsApp (Twilio)
 
 **Pour tester (bac à sable, gratuit) :**
