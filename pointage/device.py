@@ -187,6 +187,39 @@ class ZKPointeuse:
         log.info("%d fiche(s) écrite(s) sur %s.", len(carnet.fiches), self.ip)
         return len(carnet.fiches)
 
+    def retirer(self, zk_ids: set[str]) -> list[str]:
+        """Efface du boîtier ces personnes et leurs empreintes. Renvoie les numéros retirés.
+
+        Les numéros absents du boîtier sont ignorés. On passe par le numéro interne du
+        boîtier (uid) : la variante de pyzk qui passe par le numéro de l'élève est boguée
+        sous Python 3. Le boîtier est relu à la fin : seule une relecture prouve que les
+        doigts ne sont plus là (sinon un nouvel élève sous ce numéro hériterait des doigts
+        de l'ancien).
+        """
+        with self._connexion() as conn:
+            a_retirer = [u for u in conn.get_users() if str(u.user_id) in zk_ids]
+            if not a_retirer:
+                return []
+            doigts: dict[int, list[int]] = {}
+            for modele in conn.get_templates():
+                doigts.setdefault(modele.uid, []).append(modele.fid)
+            conn.disable_device()
+            try:
+                for u in a_retirer:
+                    for fid in doigts.get(u.uid, []):
+                        conn.delete_user_template(uid=u.uid, temp_id=fid)
+                    conn.delete_user(uid=u.uid)
+            finally:
+                conn.enable_device()  # toujours débloquer, même si l'effacement plante en route
+            encore_la = {str(u.user_id) for u in conn.get_users()} & zk_ids
+            uids_avec_doigts = {m.uid for m in conn.get_templates()}
+        encore_la |= {str(u.user_id) for u in a_retirer if u.uid in uids_avec_doigts}
+        if encore_la:
+            raise RuntimeError(f"toujours présent(s) sur {self.ip} après effacement : "
+                               + ", ".join(sorted(encore_la)))
+        log.info("%d personne(s) retirée(s) de %s.", len(a_retirer), self.ip)
+        return [str(u.user_id) for u in a_retirer]
+
     def _verifier_capacite(self, conn, carnet: CarnetEmpreintes, existants: dict) -> None:
         """Refuse AVANT d'écrire quoi que ce soit si le boîtier n'a pas la place.
 

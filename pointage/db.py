@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS eleves (
     date_inscription TEXT    NOT NULL,
     essai_fin        TEXT    NOT NULL,          -- dernier jour de l'essai gratuit
     abonnement_fin   TEXT,                      -- dernier jour payé (NULL = jamais payé)
-    actif_scolarite  INTEGER NOT NULL DEFAULT 1 -- 0 = a quitté l'école
+    actif_scolarite  INTEGER NOT NULL DEFAULT 1, -- 0 = a quitté l'école
+    date_depart      TEXT                        -- premier jour où il n'est plus élève (NULL = toujours là)
 );
 
 -- Personnel (professeurs, surveillants...) qui pointe sur le même boîtier.
@@ -178,7 +179,13 @@ def _migration_1(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE notifications_v1")
 
 
-MIGRATIONS = {1: _migration_1}
+def _migration_2(conn: sqlite3.Connection) -> None:
+    """Élèves partis : la date de départ apparaît (rapports justes pour les jours d'avant)."""
+    if "date_depart" not in _colonnes(conn, "eleves"):
+        conn.execute("ALTER TABLE eleves ADD COLUMN date_depart TEXT")
+
+
+MIGRATIONS = {1: _migration_1, 2: _migration_2}
 VERSION_BASE = max(MIGRATIONS)
 
 

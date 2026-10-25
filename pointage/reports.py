@@ -66,11 +66,13 @@ def _resume_pointages(conn: sqlite3.Connection, debut: str, fin: str) -> dict:
 
 
 def _eleves_inscrits(conn: sqlite3.Connection, au: date) -> list[sqlite3.Row]:
-    """Élèves scolarisés et déjà inscrits à cette date (un nouvel élève n'est
-    pas compté absent pour les jours d'avant son inscription)."""
+    """Élèves scolarisés à cette date : déjà inscrits (un nouvel élève n'est pas compté
+    absent pour les jours d'avant son inscription) et pas encore partis (un rapport
+    refait pour un jour passé compte encore l'élève parti après ce jour)."""
     return conn.execute(
-        "SELECT * FROM eleves WHERE actif_scolarite = 1 AND date_inscription <= ? "
-        "ORDER BY classe, nom, prenom", (au.isoformat(),)).fetchall()
+        "SELECT * FROM eleves WHERE date_inscription <= ? "
+        "AND (date_depart IS NULL OR date_depart > ?) "
+        "ORDER BY classe, nom, prenom", (au.isoformat(), au.isoformat())).fetchall()
 
 
 def _notifications(conn: sqlite3.Connection, debut: str, fin: str) -> dict[str, int]:

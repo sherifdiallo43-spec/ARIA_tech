@@ -4,6 +4,18 @@ Une section par version, la plus récente en haut. Le texte de chaque version in
 s'affiche à l'école à la fin de la mise à jour : l'écrire pour le directeur, pas pour
 le développeur. `pt creer-paquet` refuse de fabriquer un paquet sans sa section.
 
+## 1.1.0 (2026-10-25)
+
+Élèves qui quittent l'école et rentrée scolaire.
+
+- Un élève qui quitte l'école est marqué « parti » : ses parents ne reçoivent plus d'alerte
+  d'absence et il sort des rapports. Son historique est conservé.
+- À la rentrée, la liste complète des élèves de la nouvelle année met à jour les classes,
+  ajoute les nouveaux et repère ceux qui sont partis. Aucune empreinte à refaire pour les
+  élèves qui restent.
+- Les empreintes des élèves partis peuvent être retirées des pointeuses.
+- Le numéro d'un ancien élève n'est jamais redonné à un nouveau.
+
 ## 1.0.0 (2026-10-25)
 
 Première version numérotée d'ARIA_point.

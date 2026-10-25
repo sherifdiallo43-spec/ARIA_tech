@@ -118,6 +118,9 @@ Pour voir les messages, simule une heure proche de l'heure actuelle ou à venir.
 |---|---|
 | `pt init` | Crée la base de données |
 | `pt import-eleves fichier.csv` | Ajoute ou met à jour les élèves (réimporter ne redonne pas d'essai gratuit) |
+| `pt rentree fichier.csv [--date J]` | Nouvelle année : liste complète, les absents de la liste sont marqués partis |
+| `pt eleve-parti 45 [46 ...] [--date J]` | Un élève quitte l'école : plus d'alerte d'absence |
+| `pt nettoyer-boitier` | Efface des pointeuses les élèves partis et leurs empreintes |
 | `pt import-personnel fichier.csv` | Ajoute ou met à jour les profs et le personnel |
 | `pt import-emploi-du-temps fichier.csv` | Emploi du temps du personnel (une ligne par cours) |
 | `pt rapport-personnel [--jour J \| --mois M] [--envoyer]` | Rapport du personnel pour le directeur, et envoi par email |
@@ -157,6 +160,43 @@ zk_user_id;nom;prenom;classe;tel_parent
   C'est le lien entre le boîtier et la base. `pt utilisateurs` affiche ces numéros.
 - `tel_parent` : accepté sous toutes les formes courantes (`77 123 45 67`, `00221...`, `+221...`).
   Il est converti au format international `+221771234567`.
+- Un numéro n'est **jamais redonné** : celui d'un élève parti reste à lui (sinon son historique
+  passerait au nouveau, et ses doigts sont peut-être encore sur le boîtier). `pt statut` affiche
+  le prochain numéro libre.
+
+## Élèves qui partent, et rentrée scolaire
+
+Le boîtier ne connaît que des **numéros** et les empreintes liées. Les classes, noms et
+téléphones sont dans la base, sur le PC. Un élève qui change de classe ne refait donc **pas**
+ses empreintes : on met seulement sa classe à jour dans la base.
+
+**Un élève quitte l'école en cours d'année** : `pt eleve-parti 45` (ou `--date 2026-11-02` pour
+le premier jour où il n'est plus élève). Ses parents ne reçoivent plus d'alerte d'absence et il
+sort des rapports à partir de cette date. Rien n'est effacé : une erreur se corrige en
+réimportant l'élève, qui est réactivé.
+
+**À chaque rentrée**, avec la liste **complète** des élèves de la nouvelle année (même format CSV) :
+
+```powershell
+pt archiver --annee 2026-2027               # pendant les vacances (voir « Fin d'année scolaire »)
+pt rentree liste_2027-2028.csv --date 2027-10-04
+```
+
+- Les élèves de la liste déjà connus sont mis à jour (classe, téléphone), leurs empreintes restent.
+- Les nouveaux sont créés : enregistre leurs doigts sous leur numéro, puis `pt verifier-numeros`.
+- Les anciens élèves qui reviennent (même numéro, même nom) sont réactivés.
+- Les élèves inscrits mais **absents de la liste** sont marqués partis.
+
+La commande montre d'abord ce qui va changer (nombre de changements de classe, nouveaux,
+**liste des partants**), puis demande `RENTREE`. Par sécurité, **rien n'est appliqué** si une
+ligne du fichier est en erreur (son élève passerait pour parti), ni si plus de la moitié des
+élèves partiraient (fichier d'une seule classe ?) sans `--forcer`.
+
+**Retirer les élèves partis des pointeuses** : `pt nettoyer-boitier`. Il efface de chaque
+boîtier les élèves marqués partis et leurs empreintes, puis relit le boîtier pour vérifier. Il ne
+touche ni au personnel, ni aux numéros inconnus de la base (un administrateur du boîtier, par
+exemple). Utile pour la place (un F18 annonce environ 3 000 empreintes). À faire hors des heures
+de passage : chaque boîtier est bloqué quelques instants.
 
 ## Personnel et emploi du temps (facultatif)
 
@@ -455,6 +495,8 @@ Le logiciel fait d'abord une sauvegarde complète, copie l'année dans
 seulement vide les pointages, messages et paiements de la base principale. Les
 fiches élèves et leurs dates d'abonnement sont conservées. Les vieux pointages encore
 présents dans la mémoire de la pointeuse ne seront pas réimportés.
+
+Puis, à la rentrée : `pt rentree` (voir « Élèves qui partent, et rentrée scolaire »).
 
 ## Organisation du code
 

@@ -54,6 +54,114 @@ def cmd_import_eleves(config, args):
         print(f"  ERREUR {erreur}")
 
 
+def _fiche(e) -> str:
+    return f"{e['classe']:<8} {e['nom']} {e['prenom']} (n° {e['zk_user_id']})"
+
+
+def cmd_rentree(config, args):
+    """Nouvelle année : la liste complète des élèves remplace l'ancienne."""
+    conn = ouvrir_base(config)
+    jour = date.fromisoformat(args.date) if args.date else date.today()
+    essai = config.abonnement["essai_jours"]
+    apercu = eleves.rentree(conn, args.fichier, jour, essai, appliquer=False)
+
+    print(f"Rentrée au {jour:%d/%m/%Y}, d'après {args.fichier} :")
+    print(f"  Élèves qui restent       : {apercu.maintenus} "
+          f"(dont {apercu.changent_de_classe} changent de classe)")
+    print(f"  Nouveaux élèves          : {len(apercu.nouveaux)}")
+    if apercu.revenants:
+        print(f"  Anciens élèves de retour : {len(apercu.revenants)}")
+    print(f"  Élèves qui partent       : {len(apercu.partants)}")
+    for e in apercu.partants:
+        print(f"    {_fiche(e)}")
+    if apercu.erreurs:
+        print(f"\n{len(apercu.erreurs)} ligne(s) en erreur :")
+        for erreur in apercu.erreurs:
+            print(f"  {erreur}")
+        sys.exit("\nRien n'a été modifié : corrige ces lignes dans le fichier, puis relance.\n"
+                 "(Une ligne fausse ignorée ferait passer son élève pour parti.)")
+    if apercu.trop_de_partants and not args.forcer:
+        sys.exit(f"\nRien n'a été modifié : {len(apercu.partants)} élèves sur {apercu.actifs_avant} "
+                 "seraient marqués partis.\nLe fichier contient-il bien TOUTES les classes ? "
+                 "Si oui, relance avec --forcer.")
+    print("\nLes élèves qui partent ne recevront plus d'alerte d'absence et sortent des rapports.\n"
+          "Rien n'est effacé : leur historique reste, et les réimporter les réactive.")
+    if not args.oui and input("Tape RENTREE pour confirmer : ").strip().upper() != "RENTREE":
+        print("Annulé, rien n'a été modifié.")
+        return
+    eleves.rentree(conn, args.fichier, jour, essai, appliquer=True)
+    print("Rentrée enregistrée.")
+    print(f"Prochain numéro libre pour un nouvel élève : {eleves.prochain_numero_libre(conn)}")
+    if apercu.nouveaux:
+        print("Enregistre les doigts des nouveaux élèves sous leur numéro, puis : pt verifier-numeros")
+    if apercu.partants:
+        print("Pour retirer des pointeuses les empreintes des élèves partis : pt nettoyer-boitier")
+
+
+def cmd_eleve_parti(config, args):
+    conn = ouvrir_base(config)
+    depart = date.fromisoformat(args.date) if args.date else date.today()
+    deja = {r["zk_user_id"]: r["date_depart"] for r in conn.execute(
+        "SELECT zk_user_id, date_depart FROM eleves WHERE actif_scolarite = 0")}
+    for e in eleves.marquer_partis(conn, args.zk_ids, depart):
+        if e["zk_user_id"] in deja:
+            print(f"{_fiche(e)} : déjà parti(e) depuis le "
+                  f"{date.fromisoformat(deja[e['zk_user_id']]):%d/%m/%Y}.")
+        else:
+            print(f"{_fiche(e)} : parti(e) à partir du {depart:%d/%m/%Y}.")
+    conn.commit()
+    print("Plus d'alerte d'absence. Une erreur ? Réimporte l'élève (pt import-eleves) : il est réactivé.\n"
+          "Pour retirer ses empreintes des pointeuses : pt nettoyer-boitier")
+
+
+def cmd_nettoyer_boitier(config, args):
+    """Efface des pointeuses les élèves partis (et leurs empreintes)."""
+    boitiers = lister_pointeuses_zk(config)
+    if not boitiers:
+        sys.exit("Aucune vraie pointeuse (mode \"zk\") dans config.toml.")
+    conn = ouvrir_base(config)
+    partis = {r["zk_user_id"]: r for r in conn.execute("SELECT * FROM eleves WHERE actif_scolarite = 0")}
+    if not partis:
+        print("Aucun élève parti dans la base : rien à retirer.")
+        return
+
+    a_faire, echecs = [], []
+    for nom, boitier in boitiers:
+        try:
+            presents = {z for z, _ in boitier.lister_utilisateurs()} & set(partis)
+        except Exception as e:
+            print(f"« {nom} » injoignable ({type(e).__name__} : {e}).")
+            echecs.append(nom)
+            continue
+        print(f"« {nom} » : {len(presents)} élève(s) parti(s) encore enregistré(s).")
+        if presents:
+            a_faire.append((nom, boitier, presents))
+    if not a_faire:
+        if echecs:
+            sys.exit(f"À relancer quand ces boîtiers répondent : {', '.join(echecs)}.")
+        print("Rien à retirer.")
+        return
+
+    for zk_id in sorted(set().union(*(p for _, _, p in a_faire)), key=verification._cle_numero):
+        print(f"  {_fiche(partis[zk_id])}")
+    print("Ces élèves et leurs empreintes vont être EFFACÉS des boîtiers ci-dessus (pas de la base).\n"
+          "Chaque boîtier est bloqué quelques instants : à faire hors des heures d'arrivée et de sortie.\n"
+          "Un élève qui reviendrait plus tard devra refaire ses empreintes.")
+    if not args.oui and input("Tape NETTOYER pour confirmer : ").strip().upper() != "NETTOYER":
+        print("Annulé, rien n'a été effacé.")
+        return
+    for nom, boitier, presents in a_faire:
+        try:
+            retires = boitier.retirer(presents)
+            print(f"« {nom} » : {len(retires)} élève(s) retiré(s), vérifié par relecture.")
+        except Exception as e:
+            print(f"« {nom} » : ÉCHEC ({type(e).__name__} : {e})")
+            echecs.append(nom)
+    if echecs:
+        sys.exit(f"À relancer pour : {', '.join(echecs)}. Le nettoyage peut être refait sans risque.")
+    print("Nettoyage terminé.")
+
+
 def cmd_import_personnel(config, args):
     conn = ouvrir_base(config)
     crees, maj, erreurs = personnel.importer_csv(conn, args.fichier, date.today())
@@ -240,6 +348,10 @@ def cmd_statut(config, args):
     else:
         print(f"Élèves              : {len(liste)} (payé : {statuts['actif']}, essai : {statuts['essai']}, "
               f"expiré : {statuts['expire']})")
+    partis = conn.execute("SELECT COUNT(*) FROM eleves WHERE actif_scolarite = 0").fetchone()[0]
+    if partis:
+        print(f"Élèves partis       : {partis}")
+    print(f"Prochain n° libre   : {eleves.prochain_numero_libre(conn)} (pour un nouvel élève)")
     print(f"Personnel           : {len(personnel.lister(conn))}")
     print(f"Pointages du jour   : {pointages_jour}")
     print(f"Messages en attente : {attente}")
@@ -468,10 +580,11 @@ def cmd_annuler_mise_a_jour(config, args):
           f"(mise à jour du {journal['date'][:16].replace('T', ' à ')}).")
     if annulation.base_a_restaurer:
         print("ATTENTION : cette mise à jour avait changé la structure de la base, que l'ancienne\n"
-              "version ne sait pas lire. La base d'AVANT la mise à jour va être remise : les\n"
-              "pointages, messages et paiements enregistrés depuis en disparaîtront (la base\n"
-              f"actuelle est gardée à part dans {annulation.secours}). Les pointages encore dans\n"
-              "la mémoire de la pointeuse seront relus, mais les paiements seront à ressaisir.")
+              "version ne sait pas lire. La base d'AVANT la mise à jour va être remise : tout ce\n"
+              "qui a été enregistré depuis en disparaîtra (pointages, messages, paiements, élèves\n"
+              f"ajoutés, partis ou changés de classe). La base actuelle est gardée à part dans\n"
+              f"{annulation.secours}. Les pointages encore dans la mémoire de la pointeuse\n"
+              "seront relus, le reste sera à refaire.")
     else:
         print("La base n'est pas touchée : aucun pointage ni paiement n'est perdu.")
     if not args.oui and input("Tape ANNULER pour confirmer : ").strip().upper() != "ANNULER":
@@ -498,6 +611,24 @@ def construire_parseur() -> argparse.ArgumentParser:
     s = sous.add_parser("import-eleves", help="importe ou met à jour les élèves depuis un CSV")
     s.add_argument("fichier")
     s.set_defaults(func=cmd_import_eleves)
+
+    s = sous.add_parser("rentree", help="nouvelle année : la liste COMPLÈTE des élèves remplace l'ancienne "
+                                        "(les absents de la liste sont marqués partis)")
+    s.add_argument("fichier")
+    s.add_argument("--date", help="AAAA-MM-JJ : jour de la rentrée (par défaut : aujourd'hui)")
+    s.add_argument("--oui", action="store_true", help="ne pas demander de confirmation")
+    s.add_argument("--forcer", action="store_true",
+                   help="accepter que plus de la moitié des élèves soient marqués partis")
+    s.set_defaults(func=cmd_rentree)
+
+    s = sous.add_parser("eleve-parti", help="un ou des élèves quittent l'école (plus d'alerte d'absence)")
+    s.add_argument("zk_ids", nargs="+", metavar="NUMERO", help="numéro(s) de pointeuse de l'élève")
+    s.add_argument("--date", help="AAAA-MM-JJ : premier jour où il n'est plus élève (par défaut : aujourd'hui)")
+    s.set_defaults(func=cmd_eleve_parti)
+
+    s = sous.add_parser("nettoyer-boitier", help="efface des pointeuses les élèves partis et leurs empreintes")
+    s.add_argument("--oui", action="store_true", help="ne pas demander de confirmation")
+    s.set_defaults(func=cmd_nettoyer_boitier)
 
     s = sous.add_parser("import-personnel", help="importe ou met à jour les profs et le personnel depuis un CSV")
     s.add_argument("fichier")
