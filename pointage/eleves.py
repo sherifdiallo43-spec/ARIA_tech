@@ -54,7 +54,7 @@ def inscrire(conn: sqlite3.Connection, zk_user_id: str, nom: str, prenom: str, c
 
     existe = conn.execute("SELECT * FROM eleves WHERE zk_user_id = ?", (zk_user_id,)).fetchone()
     if existe:
-        if not existe["actif_scolarite"] and _cle_nom(existe["nom"], existe["prenom"]) != _cle_nom(nom, prenom):
+        if not existe["actif_scolarite"] and cle_nom(existe["nom"], existe["prenom"]) != cle_nom(nom, prenom):
             # Numéro d'un ancien élève donné à un nouveau : l'historique de l'ancien
             # (pointages, absences) lui serait attribué, et les doigts de l'ancien
             # sont peut-être encore sur le boîtier sous ce numéro.
@@ -86,7 +86,7 @@ def lire_texte(chemin: Path) -> str:
         return contenu.decode("cp1252")
 
 
-def _cle_nom(nom: str, prenom: str) -> str:
+def cle_nom(nom: str, prenom: str) -> str:
     """« Awa  DIOP » et « awa Diop », « Aïda » et « Aida » : la même personne."""
     texte = unicodedata.normalize("NFKD", f"{prenom} {nom}")
     texte = "".join(c for c in texte if not unicodedata.combining(c))

@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS personnel (
     prenom           TEXT    NOT NULL,
     fonction         TEXT    NOT NULL,
     date_inscription TEXT    NOT NULL,
-    actif            INTEGER NOT NULL DEFAULT 1
+    actif            INTEGER NOT NULL DEFAULT 1,
+    date_depart      TEXT     -- premier jour où il ne fait plus partie du personnel (NULL = toujours là)
 );
 
 -- Emploi du temps du personnel : une ligne par cours de la semaine.
@@ -185,7 +186,13 @@ def _migration_2(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE eleves ADD COLUMN date_depart TEXT")
 
 
-MIGRATIONS = {1: _migration_1, 2: _migration_2}
+def _migration_3(conn: sqlite3.Connection) -> None:
+    """Personnel parti : la date de départ apparaît, comme pour les élèves."""
+    if "date_depart" not in _colonnes(conn, "personnel"):
+        conn.execute("ALTER TABLE personnel ADD COLUMN date_depart TEXT")
+
+
+MIGRATIONS = {1: _migration_1, 2: _migration_2, 3: _migration_3}
 VERSION_BASE = max(MIGRATIONS)
 
 

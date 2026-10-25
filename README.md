@@ -120,7 +120,8 @@ Pour voir les messages, simule une heure proche de l'heure actuelle ou à venir.
 | `pt import-eleves fichier.csv` | Ajoute ou met à jour les élèves (réimporter ne redonne pas d'essai gratuit) |
 | `pt rentree fichier.csv [--date J]` | Nouvelle année : liste complète, les absents de la liste sont marqués partis |
 | `pt eleve-parti 45 [46 ...] [--date J]` | Un élève quitte l'école : plus d'alerte d'absence |
-| `pt nettoyer-boitier` | Efface des pointeuses les élèves partis et leurs empreintes |
+| `pt personnel-parti 901 [--date J]` | Un membre du personnel quitte l'école : il sort du rapport du directeur |
+| `pt nettoyer-boitier` | Efface des pointeuses les élèves et le personnel partis, et leurs empreintes |
 | `pt import-personnel fichier.csv` | Ajoute ou met à jour les profs et le personnel |
 | `pt import-emploi-du-temps fichier.csv` | Emploi du temps du personnel (une ligne par cours) |
 | `pt rapport-personnel [--jour J \| --mois M] [--envoyer]` | Rapport du personnel pour le directeur, et envoi par email |
@@ -192,10 +193,10 @@ La commande montre d'abord ce qui va changer (nombre de changements de classe, n
 ligne du fichier est en erreur (son élève passerait pour parti), ni si plus de la moitié des
 élèves partiraient (fichier d'une seule classe ?) sans `--forcer`.
 
-**Retirer les élèves partis des pointeuses** : `pt nettoyer-boitier`. Il efface de chaque
-boîtier les élèves marqués partis et leurs empreintes, puis relit le boîtier pour vérifier. Il ne
-touche ni au personnel, ni aux numéros inconnus de la base (un administrateur du boîtier, par
-exemple). Utile pour la place (un F18 annonce environ 3 000 empreintes). À faire hors des heures
+**Retirer les partis des pointeuses** : `pt nettoyer-boitier`. Il efface de chaque boîtier les
+élèves et membres du personnel marqués partis, avec leurs empreintes, puis relit le boîtier pour
+vérifier. Il ne touche ni aux personnes encore là, ni aux numéros inconnus de la base (un
+administrateur du boîtier, par exemple). Utile pour la place (un F18 annonce environ 3 000 empreintes). À faire hors des heures
 de passage : chaque boîtier est bloqué quelques instants.
 
 ## Personnel et emploi du temps (facultatif)
@@ -232,6 +233,12 @@ gardent le leur). Une personne avec une ligne en erreur garde son ancien emploi 
 - Un jour sans cours n'est jamais compté comme absence.
 - Heures = temps de présence (arrivée → sortie). Une sortie oubliée n'est pas comptée.
 - Aucun message WhatsApp, aucun abonnement pour le personnel.
+
+**Un membre du personnel quitte l'école** : `pt personnel-parti 901` (ou `--date 2026-11-02`,
+premier jour où il n'en fait plus partie). Il sort du rapport du directeur à partir de cette
+date, sinon ses cours y seraient « manqués » chaque jour. Le rapport du mois de son départ le
+garde, avec ses heures jusqu'au départ (utile pour la paie). Rien n'est effacé, et le
+réimporter le réactive. Son numéro n'est jamais redonné à quelqu'un d'autre.
 
 ## Rapport du personnel pour le directeur
 

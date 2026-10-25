@@ -21,7 +21,7 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
 from .db import dt_texte, texte_dt
-from .eleves import lire_texte
+from .eleves import cle_nom, lire_texte
 
 JOURS = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
 COLONNES = ("zk_user_id", "nom", "prenom", "fonction")
@@ -63,10 +63,15 @@ def inscrire(conn: sqlite3.Connection, zk_user_id: str, nom: str, prenom: str, f
     if conn.execute("SELECT 1 FROM eleves WHERE zk_user_id = ?", (zk_user_id,)).fetchone():
         raise ValueError(f"le numéro de pointeuse {zk_user_id} est déjà celui d'un élève")
 
-    existe = conn.execute("SELECT id FROM personnel WHERE zk_user_id = ?", (zk_user_id,)).fetchone()
+    existe = conn.execute("SELECT * FROM personnel WHERE zk_user_id = ?", (zk_user_id,)).fetchone()
     if existe:
-        conn.execute("UPDATE personnel SET nom = ?, prenom = ?, fonction = ?, actif = 1 WHERE id = ?",
-                     (nom, prenom, fonction, existe["id"]))
+        if not existe["actif"] and cle_nom(existe["nom"], existe["prenom"]) != cle_nom(nom, prenom):
+            # Même règle que pour les élèves : l'historique de l'ancien passerait au nouveau.
+            raise ValueError(
+                f"le numéro {zk_user_id} était celui de {existe['prenom']} {existe['nom']}, parti(e) "
+                f"de l'école. Donne un autre numéro à {prenom} {nom}.")
+        conn.execute("UPDATE personnel SET nom = ?, prenom = ?, fonction = ?, actif = 1, "
+                     "date_depart = NULL WHERE id = ?", (nom, prenom, fonction, existe["id"]))
         return "maj"
     conn.execute("INSERT INTO personnel (zk_user_id, nom, prenom, fonction, date_inscription) "
                  "VALUES (?, ?, ?, ?, ?)", (zk_user_id, nom, prenom, fonction, aujourd_hui.isoformat()))
@@ -146,10 +151,32 @@ def trouver(conn: sqlite3.Connection, zk_user_id: str) -> sqlite3.Row | None:
 
 
 def lister(conn: sqlite3.Connection, au: date | None = None) -> list[sqlite3.Row]:
-    """Personnel actif, inscrit au plus tard le jour `au` (tous si `au` est None)."""
-    limite = (au or date.max).isoformat()
-    return conn.execute("SELECT * FROM personnel WHERE actif = 1 AND date_inscription <= ? "
-                        "ORDER BY nom, prenom", (limite,)).fetchall()
+    """Sans date : le personnel actuel. Avec une date : celui qui en faisait partie ce
+    jour-là, déjà inscrit et pas encore parti (un rapport refait pour un jour passé
+    compte encore le prof parti depuis)."""
+    if au is None:
+        return conn.execute("SELECT * FROM personnel WHERE actif = 1 ORDER BY nom, prenom").fetchall()
+    return conn.execute("SELECT * FROM personnel WHERE date_inscription <= ? "
+                        "AND (date_depart IS NULL OR date_depart > ?) ORDER BY nom, prenom",
+                        (au.isoformat(), au.isoformat())).fetchall()
+
+
+def marquer_partis(conn: sqlite3.Connection, zk_ids: list[str], depart: date) -> list[sqlite3.Row]:
+    """Membres du personnel qui quittent l'école à partir du jour `depart`.
+
+    Ils sortent du rapport du directeur à partir de ce jour (sinon leurs cours y seraient
+    « manqués » chaque jour). Rien n'est effacé, emploi du temps compris : les rapports
+    des jours d'avant restent justes, et une réinscription les réactive.
+    Renvoie les membres trouvés. L'appelant fait le commit.
+    """
+    inconnus = [z for z in zk_ids
+                if not conn.execute("SELECT 1 FROM personnel WHERE zk_user_id = ?", (z,)).fetchone()]
+    if inconnus:
+        raise ValueError(f"aucun membre du personnel avec le(s) numéro(s) {', '.join(inconnus)}")
+    for zk_id in zk_ids:
+        conn.execute("UPDATE personnel SET actif = 0, date_depart = ? WHERE zk_user_id = ? AND actif = 1",
+                     (depart.isoformat(), zk_id))
+    return [conn.execute("SELECT * FROM personnel WHERE zk_user_id = ?", (z,)).fetchone() for z in zk_ids]
 
 
 def _emplois_du_temps(conn: sqlite3.Connection) -> dict[tuple[str, str], list[dict]]:
@@ -239,7 +266,10 @@ def analyser_cours(cours: list[dict], moments: list[datetime], jour: date,
 
 
 def _identite(membre: sqlite3.Row) -> dict:
-    return {"nom": f"{membre['prenom']} {membre['nom']}", "fonction": membre["fonction"]}
+    fonction = membre["fonction"]
+    if membre["date_depart"]:
+        fonction += f" (parti(e) depuis le {date.fromisoformat(membre['date_depart']):%d/%m})"
+    return {"nom": f"{membre['prenom']} {membre['nom']}", "fonction": fonction}
 
 
 def plages(cours: list[dict]) -> str:
@@ -298,11 +328,17 @@ def calculer_mois(conn: sqlite3.Connection, annee: int, mois: int, tolerance_min
     moments = _moments(conn, premier, lendemain)
     edt = _emplois_du_temps(conn)
 
+    # Tous ceux qui ont fait partie du personnel pendant le mois : un prof parti le 15
+    # figure dans le rapport pour la première quinzaine (ses heures comptent pour la paie).
+    membres = conn.execute(
+        "SELECT * FROM personnel WHERE date_inscription <= ? AND (date_depart IS NULL OR date_depart > ?) "
+        "ORDER BY nom, prenom", (dernier.isoformat(), premier.isoformat())).fetchall()
     lignes = []
-    for m in lister(conn, dernier):
+    for m in membres:
         zk_id = m["zk_user_id"]
         prevus = [j for j in jours_ouverts
                   if m["date_inscription"] <= j.isoformat() and j <= aujourd_hui
+                  and (m["date_depart"] is None or j.isoformat() < m["date_depart"])
                   and edt.get((zk_id, JOURS[j.weekday()]))]
         analyses = [analyser_cours(edt[(zk_id, JOURS[j.weekday()])], moments.get((zk_id, j.isoformat()), []),
                                    j, tolerance_minutes) for j in prevus]

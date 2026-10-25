@@ -4,6 +4,15 @@ Une section par version, la plus récente en haut. Le texte de chaque version in
 s'affiche à l'école à la fin de la mise à jour : l'écrire pour le directeur, pas pour
 le développeur. `pt creer-paquet` refuse de fabriquer un paquet sans sa section.
 
+## 1.2.0 (2026-10-25)
+
+Membres du personnel qui quittent l'école.
+
+- Un professeur ou un membre du personnel qui part sort du rapport du directeur à partir de
+  son départ : ses cours n'apparaissent plus comme « manqués ».
+- Le rapport du mois de son départ le garde, avec ses heures jusqu'à son départ.
+- Ses empreintes peuvent être retirées des pointeuses, comme celles des élèves partis.
+
 ## 1.1.0 (2026-10-25)
 
 Élèves qui quittent l'école et rentrée scolaire.

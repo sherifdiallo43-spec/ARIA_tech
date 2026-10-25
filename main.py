@@ -55,7 +55,9 @@ def cmd_import_eleves(config, args):
 
 
 def _fiche(e) -> str:
-    return f"{e['classe']:<8} {e['nom']} {e['prenom']} (n° {e['zk_user_id']})"
+    """Une ligne lisible pour un élève (sa classe) ou un membre du personnel (sa fonction)."""
+    groupe = e["classe"] if "classe" in e.keys() else e["fonction"]
+    return f"{groupe:<8} {e['nom']} {e['prenom']} (n° {e['zk_user_id']})"
 
 
 def cmd_rentree(config, args):
@@ -114,15 +116,33 @@ def cmd_eleve_parti(config, args):
           "Pour retirer ses empreintes des pointeuses : pt nettoyer-boitier")
 
 
+def cmd_personnel_parti(config, args):
+    conn = ouvrir_base(config)
+    depart = date.fromisoformat(args.date) if args.date else date.today()
+    deja = {r["zk_user_id"]: r["date_depart"] for r in conn.execute(
+        "SELECT zk_user_id, date_depart FROM personnel WHERE actif = 0")}
+    for m in personnel.marquer_partis(conn, args.zk_ids, depart):
+        if m["zk_user_id"] in deja:
+            quand = f"le {date.fromisoformat(deja[m['zk_user_id']]):%d/%m/%Y}" if deja[m["zk_user_id"]] else ""
+            print(f"{_fiche(m)} : déjà parti(e) {quand}".rstrip() + ".")
+        else:
+            print(f"{_fiche(m)} : parti(e) à partir du {depart:%d/%m/%Y}.")
+    conn.commit()
+    print("Ses cours ne comptent plus comme manqués dans le rapport du directeur à partir de cette date.\n"
+          "Une erreur ? Réimporte-le (pt import-personnel) : il est réactivé.\n"
+          "Pour retirer ses empreintes des pointeuses : pt nettoyer-boitier")
+
+
 def cmd_nettoyer_boitier(config, args):
-    """Efface des pointeuses les élèves partis (et leurs empreintes)."""
+    """Efface des pointeuses les élèves et le personnel partis (et leurs empreintes)."""
     boitiers = lister_pointeuses_zk(config)
     if not boitiers:
         sys.exit("Aucune vraie pointeuse (mode \"zk\") dans config.toml.")
     conn = ouvrir_base(config)
     partis = {r["zk_user_id"]: r for r in conn.execute("SELECT * FROM eleves WHERE actif_scolarite = 0")}
+    partis |= {r["zk_user_id"]: r for r in conn.execute("SELECT * FROM personnel WHERE actif = 0")}
     if not partis:
-        print("Aucun élève parti dans la base : rien à retirer.")
+        print("Aucun élève ni membre du personnel parti dans la base : rien à retirer.")
         return
 
     a_faire, echecs = [], []
@@ -133,7 +153,7 @@ def cmd_nettoyer_boitier(config, args):
             print(f"« {nom} » injoignable ({type(e).__name__} : {e}).")
             echecs.append(nom)
             continue
-        print(f"« {nom} » : {len(presents)} élève(s) parti(s) encore enregistré(s).")
+        print(f"« {nom} » : {len(presents)} personne(s) partie(s) encore enregistrée(s).")
         if presents:
             a_faire.append((nom, boitier, presents))
     if not a_faire:
@@ -144,16 +164,16 @@ def cmd_nettoyer_boitier(config, args):
 
     for zk_id in sorted(set().union(*(p for _, _, p in a_faire)), key=verification._cle_numero):
         print(f"  {_fiche(partis[zk_id])}")
-    print("Ces élèves et leurs empreintes vont être EFFACÉS des boîtiers ci-dessus (pas de la base).\n"
+    print("Ces personnes et leurs empreintes vont être EFFACÉES des boîtiers ci-dessus (pas de la base).\n"
           "Chaque boîtier est bloqué quelques instants : à faire hors des heures d'arrivée et de sortie.\n"
-          "Un élève qui reviendrait plus tard devra refaire ses empreintes.")
+          "Quelqu'un qui reviendrait plus tard devra refaire ses empreintes.")
     if not args.oui and input("Tape NETTOYER pour confirmer : ").strip().upper() != "NETTOYER":
         print("Annulé, rien n'a été effacé.")
         return
     for nom, boitier, presents in a_faire:
         try:
             retires = boitier.retirer(presents)
-            print(f"« {nom} » : {len(retires)} élève(s) retiré(s), vérifié par relecture.")
+            print(f"« {nom} » : {len(retires)} personne(s) retirée(s), vérifié par relecture.")
         except Exception as e:
             print(f"« {nom} » : ÉCHEC ({type(e).__name__} : {e})")
             echecs.append(nom)
@@ -353,6 +373,9 @@ def cmd_statut(config, args):
         print(f"Élèves partis       : {partis}")
     print(f"Prochain n° libre   : {eleves.prochain_numero_libre(conn)} (pour un nouvel élève)")
     print(f"Personnel           : {len(personnel.lister(conn))}")
+    partis = conn.execute("SELECT COUNT(*) FROM personnel WHERE actif = 0").fetchone()[0]
+    if partis:
+        print(f"Personnel parti     : {partis}")
     print(f"Pointages du jour   : {pointages_jour}")
     print(f"Messages en attente : {attente}")
     print(f"Dernière lecture    : {db.lire_etat(conn, 'derniere_sync', 'jamais')}")
@@ -626,7 +649,14 @@ def construire_parseur() -> argparse.ArgumentParser:
     s.add_argument("--date", help="AAAA-MM-JJ : premier jour où il n'est plus élève (par défaut : aujourd'hui)")
     s.set_defaults(func=cmd_eleve_parti)
 
-    s = sous.add_parser("nettoyer-boitier", help="efface des pointeuses les élèves partis et leurs empreintes")
+    s = sous.add_parser("personnel-parti", help="un ou des membres du personnel quittent l'école "
+                                                "(ils sortent du rapport du directeur)")
+    s.add_argument("zk_ids", nargs="+", metavar="NUMERO", help="numéro(s) de pointeuse")
+    s.add_argument("--date", help="AAAA-MM-JJ : premier jour où il n'en fait plus partie (par défaut : aujourd'hui)")
+    s.set_defaults(func=cmd_personnel_parti)
+
+    s = sous.add_parser("nettoyer-boitier",
+                        help="efface des pointeuses les élèves et le personnel partis, et leurs empreintes")
     s.add_argument("--oui", action="store_true", help="ne pas demander de confirmation")
     s.set_defaults(func=cmd_nettoyer_boitier)
 

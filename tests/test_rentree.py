@@ -105,7 +105,7 @@ def test_le_numero_d_un_ancien_eleve_n_est_pas_redonne(conn, config, trois_eleve
 
 
 def test_meme_nom_ecrit_autrement():
-    assert eleves._cle_nom("DIOP", "Aïda  Ndèye") == eleves._cle_nom("Diop", "aida ndeye")
+    assert eleves.cle_nom("DIOP", "Aïda  Ndèye") == eleves.cle_nom("Diop", "aida ndeye")
 
 
 def test_prochain_numero_libre(conn, config, trois_eleves):
@@ -183,7 +183,7 @@ def test_une_base_en_version_1_recoit_la_date_de_depart(tmp_path):
 
     conn = db.connecter(tmp_path / "v1.db")
     db.initialiser(conn)
-    assert db.version_base(conn) == 2
+    assert db.version_base(conn) == db.VERSION_BASE
     assert eleve(conn, "1")["date_depart"] is None and eleve(conn, "1")["prenom"] == "Awa"
     conn.close()
 
@@ -253,7 +253,7 @@ def test_commande_nettoyer_ne_touche_qu_aux_eleves_partis(conn, config, trois_el
 
     assert principal.numeros() == secondaire.numeros() == ["1", "2", "900", "999"]
     sortie = capsys.readouterr().out
-    assert sortie.count("1 élève(s) retiré(s), vérifié") == 2
+    assert sortie.count("1 personne(s) retirée(s), vérifié") == 2
     assert eleve(conn, "3") is not None  # la fiche reste dans la base
 
 
