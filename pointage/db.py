@@ -118,25 +118,68 @@ def connecter(chemin: Path | str) -> sqlite3.Connection:
     return conn
 
 
+class BaseTropRecente(ValueError):
+    """La base a été mise à jour par une version plus récente du logiciel."""
+
+
+def version_base(conn: sqlite3.Connection) -> int:
+    """Numéro de version de la structure de la base (0 = base d'avant la numérotation)."""
+    return conn.execute("PRAGMA user_version").fetchone()[0]
+
+
 def initialiser(conn: sqlite3.Connection) -> None:
-    """Crée les tables manquantes et met à jour une base d'une version précédente."""
-    colonnes = _colonnes(conn, "notifications")
-    ancienne = bool(colonnes) and "moment" not in colonnes
-    if ancienne:
-        # SQLite ne sait pas rendre une colonne facultative : on met l'ancienne table
-        # de côté, on crée la nouvelle (executescript ci-dessous), puis on recopie.
-        conn.execute("ALTER TABLE notifications RENAME TO notifications_v1")
-        conn.execute("DROP INDEX IF EXISTS idx_notifications_statut")
-    conn.executescript(SCHEMA)
-    if ancienne:
-        conn.execute(
-            "INSERT INTO notifications (id, pointage_id, zk_user_id, moment, type, tel, message, "
-            "  variables, statut, tentatives, erreur, cree_le, envoye_le) "
-            "SELECT n.id, n.pointage_id, p.zk_user_id, p.horodatage, p.type, n.tel, n.message, "
-            "  n.variables, n.statut, n.tentatives, n.erreur, n.cree_le, n.envoye_le "
-            "FROM notifications_v1 n JOIN pointages p ON p.id = n.pointage_id")
-        conn.execute("DROP TABLE notifications_v1")
+    """Crée les tables manquantes et met à jour une base d'une version précédente.
+
+    Le numéro de version est rangé dans l'en-tête du fichier SQLite (PRAGMA user_version).
+    Une base neuve reçoit directement le schéma complet (SCHEMA) et le dernier numéro.
+    Une base existante passe par chaque migration manquante, dans l'ordre : une école
+    restée en version 1 pendant que le logiciel passait en 3 reçoit la 2 puis la 3.
+    """
+    version = version_base(conn)
+    if version > VERSION_BASE:
+        raise BaseTropRecente(
+            f"la base est en version {version}, ce logiciel ne connaît que la version "
+            f"{VERSION_BASE}. Elle a été mise à jour par un logiciel plus récent : "
+            "réinstalle la dernière version d'ARIA_point.")
+    existante = conn.execute("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'").fetchone()[0]
+    if existante:  # une base neuve n'a encore aucune table : rien à migrer
+        for numero in range(version + 1, VERSION_BASE + 1):
+            MIGRATIONS[numero](conn)
+    conn.executescript(SCHEMA)  # tables nouvelles (une nouvelle table n'a pas besoin de migration)
+    conn.execute(f"PRAGMA user_version = {VERSION_BASE}")
     conn.commit()
+
+
+# --- Migrations ------------------------------------------------------------------
+#
+# Pour changer la structure d'une table qui existe déjà (ajouter une colonne...) :
+# 1. modifier SCHEMA (pour les bases neuves) ;
+# 2. écrire une fonction _migration_N (pour les bases existantes) et l'ajouter à MIGRATIONS ;
+# 3. passer VERSION_BASE à N.
+# Une migration peut être relancée après une coupure de courant : elle doit vérifier
+# ce qui est déjà fait (comme _migration_1) plutôt que tout refaire à l'aveugle.
+
+def _migration_1(conn: sqlite3.Connection) -> None:
+    """Notifications sans pointage (alertes d'absence) : la colonne `moment` apparaît."""
+    colonnes = _colonnes(conn, "notifications")
+    if not colonnes or "moment" in colonnes:
+        return
+    # SQLite ne sait pas rendre une colonne facultative : on met l'ancienne table
+    # de côté, on crée la nouvelle, puis on recopie.
+    conn.execute("ALTER TABLE notifications RENAME TO notifications_v1")
+    conn.execute("DROP INDEX IF EXISTS idx_notifications_statut")
+    conn.executescript(SCHEMA)
+    conn.execute(
+        "INSERT INTO notifications (id, pointage_id, zk_user_id, moment, type, tel, message, "
+        "  variables, statut, tentatives, erreur, cree_le, envoye_le) "
+        "SELECT n.id, n.pointage_id, p.zk_user_id, p.horodatage, p.type, n.tel, n.message, "
+        "  n.variables, n.statut, n.tentatives, n.erreur, n.cree_le, n.envoye_le "
+        "FROM notifications_v1 n JOIN pointages p ON p.id = n.pointage_id")
+    conn.execute("DROP TABLE notifications_v1")
+
+
+MIGRATIONS = {1: _migration_1}
+VERSION_BASE = max(MIGRATIONS)
 
 
 def _colonnes(conn: sqlite3.Connection, table: str) -> set[str]:

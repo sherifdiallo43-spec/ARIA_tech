@@ -138,6 +138,11 @@ Pour voir les messages, simule une heure proche de l'heure actuelle ou à venir.
 | `pt utilisateurs` | Liste les utilisateurs enregistrés dans la pointeuse |
 | `pt verifier-numeros` | Compare les numéros du boîtier avec la base (doigts manquants, fautes de frappe) |
 | `pt copier-empreintes [--source NOM]` | Recopie les personnes et empreintes d'un boîtier vers les autres (voir plus bas) |
+| `pt version` | Version du logiciel et de la base |
+| `pt mettre-a-jour PAQUET.zip` | Installe une nouvelle version (voir « Mises à jour ») |
+| `pt annuler-mise-a-jour` | Revient à la version d'avant la dernière mise à jour |
+| `pt verifier-installation` | Contrôle que le logiciel tourne avec la configuration et la base de l'école |
+| `pt creer-paquet` | (PC de développement) Fabrique le paquet de mise à jour dans `dist/` |
 
 ## Fichier des élèves (CSV)
 
@@ -377,6 +382,65 @@ service. Les pointages encore dans la mémoire de la pointeuse depuis cette date
 récupérés automatiquement à la lecture suivante, sauf si la mémoire a été vidée entre-temps
 (les vidages gardent une copie brute dans `backups/memoire_pointeuse_*.json`).
 
+## Mises à jour
+
+Le logiciel tourne sur le PC de l'école : une correction faite chez ARIA_tech n'y arrive
+pas toute seule. On lui envoie un **paquet** (`ARIA_point_1.1.0.zip`), qu'elle installe en
+une commande. Rien n'est automatique, exprès : une mise à jour ratée un matin bloquerait
+le portail au moment où les parents attendent les messages.
+
+**Chez ARIA_tech (PC de développement)**
+
+1. Augmente `__version__` dans `pointage/__init__.py` : `1.0.1` pour une correction,
+   `1.1.0` pour une nouvelle fonction, `2.0.0` pour un gros changement.
+2. Ajoute une section `## 1.1.0` en haut de `NOTES_DE_VERSION.md`, écrite pour le directeur.
+3. Commite, puis `pt creer-paquet` : il refuse s'il reste des fichiers non commités ou si un
+   test échoue, puis crée `dist/ARIA_point_1.1.0.zip`.
+4. Envoie le zip à l'école (WhatsApp, email, clé USB).
+
+**À l'école (le soir ou le week-end, jamais aux heures de passage)**
+
+1. Arrête le service (Planificateur de tâches > clic droit sur la tâche > Terminer) et le
+   tableau de bord.
+2. Glisse le zip sur `mettre-a-jour.bat` (ou `pt mettre-a-jour ARIA_point_1.1.0.zip`), tape `MAJ`.
+3. Relance le service et le tableau de bord.
+
+Ce que fait la mise à jour, dans l'ordre :
+
+- vérifie le paquet (complet, non modifié depuis sa création, version plus récente) ;
+- refuse si le service ou le tableau de bord tourne, et les empêche de redémarrer pendant
+  l'installation (un service relancé pendant ce temps s'arrête aussitôt, sans rien faire) ;
+- met de côté la base et les fichiers qui vont changer dans `backups/mise_a_jour_.../` ;
+- installe les fichiers, et les bibliothèques si `requirements.txt` a changé (internet
+  nécessaire dans ce cas) ;
+- lance le nouveau logiciel dans un programme séparé (`pt verifier-installation`) : il lit la
+  configuration de l'école, met la structure de la base à jour et la contrôle ;
+- **au moindre échec, remet tout comme avant** (fichiers et base) et dit pourquoi.
+
+Une mise à jour ne touche jamais à `config.toml` (réglages de l'école), `.env`, `data/`,
+`backups/`, `archives/`, `rapports/` ni `logs/`. Le `config.toml` livré est déposé à côté
+sous le nom `config.reference.toml` : un réglage apparu dans la nouvelle version prend sa
+valeur par défaut tant qu'il n'est pas ajouté au `config.toml` de l'école (la mise à jour
+liste ces nouveaux réglages).
+
+**Revenir en arrière plus tard** (un problème découvert en cours de journée) :
+`pt annuler-mise-a-jour`. Si la structure de la base n'a pas changé, la base est gardée
+telle quelle, aucun pointage n'est perdu. Sinon, l'ancienne version ne saurait pas la lire :
+la base d'avant la mise à jour est remise (les pointages encore dans la mémoire de la
+pointeuse sont relus, mais les paiements saisis depuis sont à ressaisir), et la base
+actuelle est gardée à part.
+
+`pt version` affiche la version du logiciel et celle de la base.
+
+**Installer une nouvelle école** : dézippe le paquet dans un dossier (par exemple
+`C:\ARIA_point`), puis suis « Installation » ci-dessus à partir de l'étape 1. Le fichier
+`paquet.json` du zip indique la version installée.
+
+**Pour le développeur : changer la structure de la base.** Ajouter une table : il suffit de
+l'ajouter à `SCHEMA` dans `pointage/db.py`. Modifier une table existante (nouvelle colonne...) :
+modifier `SCHEMA` **et** écrire une migration (`_migration_2`...), voir les explications dans
+`db.py`. Ne jamais lancer `pt mettre-a-jour` dans le dossier de développement (il refuse).
+
 ## Fin d'année scolaire
 
 Pendant les vacances, après la dernière journée de cours :
@@ -408,6 +472,8 @@ pointage/purge.py        vidage sécurisé de la mémoire du boîtier
 pointage/reports.py      statistiques mensuelles et PDF
 pointage/archive.py      archivage de fin d'année
 pointage/service.py      boucle du service continu
+pointage/verrou.py       verrous : le service ou le tableau de bord tourne-t-il déjà ?
+pointage/miseajour.py    paquets de mise à jour, installation, retour en arrière
 pointage/web.py          tableau de bord web (Flask) ; pages dans pointage/templates/
 tests/                   tests automatiques (pytest)
 ```
@@ -418,7 +484,6 @@ tests/                   tests automatiques (pytest)
   matin est compté comme une sortie : le logiciel suppose qu'il a oublié de pointer en arrivant.
 - Un élève absent un jour sans aucun pointage dans toute l'école (grève, jour férié
   imprévu) n'est pas compté absent : ce jour n'est pas considéré comme un jour d'école.
-- Une seule pointeuse par école.
 - Paiements saisis à la main (pas encore de Wave ou d'Orange Money).
 
 ## Données personnelles

@@ -4,13 +4,16 @@ from __future__ import annotations
 import argparse
 import logging
 import random
+import sqlite3
+import subprocess
 import sys
 from datetime import date, datetime, timedelta
 from logging.handlers import RotatingFileHandler
 
-from pointage import (archive, backup, collector, courriel, db, eleves, notifier, personnel, purge,
-                      reports, service, verification)
-from pointage.config import Config, charger
+import pointage
+from pointage import (archive, backup, collector, courriel, db, eleves, miseajour, notifier, personnel,
+                      purge, reports, service, verification, verrou)
+from pointage.config import RACINE_PROJET, Config, charger
 from pointage.device import (PointeuseSimulee, PointageBrut, creer_pointeuse, generer_journee,
                              generer_journee_personnel, lister_pointeuses_zk)
 from pointage.subscriptions import au_forfait, enregistrer_paiement, statut_abonnement
@@ -231,6 +234,7 @@ def cmd_statut(config, args):
                                   (aujourd_hui.isoformat(),)).fetchone()[0]
     attente = conn.execute("SELECT COUNT(*) FROM notifications WHERE statut = 'en_attente'").fetchone()[0]
     print(f"École               : {config.nom_ecole}")
+    print(f"Version             : {pointage.__version__} (base en version {db.version_base(conn)})")
     if au_forfait(config.abonnement):
         print(f"Élèves              : {len(liste)} (forfait payé par l'école)")
     else:
@@ -299,12 +303,20 @@ def cmd_web(config, args):
     if len(mot_de_passe) < web.MOT_DE_PASSE_MIN:
         sys.exit(f"Mets un mot de passe d'au moins {web.MOT_DE_PASSE_MIN} caractères dans .env "
                  "(DASHBOARD_PASSWORD=...). Une phrase est plus facile à retenir.")
+    try:
+        # Gardé tant que le tableau de bord tourne : une mise à jour attend qu'il soit arrêté.
+        verrou_web = verrou.prendre(config, verrou.WEB)
+    except verrou.DejaEnCours:
+        sys.exit("Le tableau de bord tourne déjà sur ce PC, ou une mise à jour est en cours.")
     ouvrir_base(config).close()  # crée la base si elle n'existe pas encore
     # 127.0.0.1 : seul ce PC peut ouvrir le tableau de bord. 0.0.0.0 : tout le réseau de l'école.
     hote = "0.0.0.0" if args.reseau else "127.0.0.1"
     print(f"Tableau de bord : http://localhost:{args.port}"
           + ("  (aussi accessible depuis le réseau de l'école)" if args.reseau else ""))
-    serve(create_app(config, mot_de_passe), host=hote, port=args.port)
+    try:
+        serve(create_app(config, mot_de_passe), host=hote, port=args.port)
+    finally:
+        verrou.liberer(verrou_web)
 
 
 def cmd_utilisateurs(config, args):
@@ -398,6 +410,81 @@ def cmd_copier_empreintes(config, args):
     if echecs:
         sys.exit(f"\nÀ relancer pour : {', '.join(echecs)}. La copie peut être refaite sans risque.")
     print("\nCopie terminée sur tous les boîtiers.")
+
+
+# --- Versions et mises à jour ------------------------------------------------------
+
+def cmd_version(config, args):
+    print(f"ARIA_point {pointage.__version__} (structure de base attendue : version {db.VERSION_BASE})")
+    base = config.chemin("base")
+    if base.exists():
+        # Lecture seule : on ne lance pas les migrations juste pour afficher un numéro.
+        conn = sqlite3.connect(base)
+        print(f"Base de l'école : version {db.version_base(conn)}")
+        conn.close()
+
+
+def cmd_creer_paquet(config, args):
+    """Sur le PC de développement : fabrique le paquet à envoyer aux écoles."""
+    miseajour.verifier_depot_propre(RACINE_PROJET)
+    version = miseajour.version_installee(RACINE_PROJET)
+    print(f"Version {version} : lancement des tests...")
+    if subprocess.run([sys.executable, "-m", "pytest", "-q"], cwd=RACINE_PROJET).returncode != 0:
+        sys.exit("Des tests échouent : aucun paquet créé. Corrige-les d'abord.")
+    chemin = miseajour.construire_paquet(RACINE_PROJET, miseajour.fichiers_suivis(RACINE_PROJET),
+                                         version, miseajour.commit_actuel(RACINE_PROJET),
+                                         RACINE_PROJET / "dist")
+    print(f"\nPaquet créé : {chemin}\nÀ envoyer à l'école, qui le glisse sur mettre-a-jour.bat.")
+
+
+def cmd_mettre_a_jour(config, args):
+    paquet = miseajour.ouvrir_paquet(args.fichier)
+    print(f"Version installée : {miseajour.version_installee(RACINE_PROJET)}")
+    print(f"Nouvelle version  : {paquet.version} (paquet du {paquet.cree_le[:10]})")
+    print("La base et les fichiers actuels sont mis de côté avant de commencer. Au moindre\n"
+          "problème, tout est remis comme avant. À faire hors des heures d'arrivée et de sortie.")
+    if not args.oui and input("Tape MAJ pour confirmer : ").strip().upper() != "MAJ":
+        print("Annulé, rien n'a été modifié.")
+        return
+    resultat = miseajour.appliquer(RACINE_PROJET, args.fichier, config, forcer=args.forcer,
+                                   etape=lambda message: print(f"  {message}"))
+    print(f"\nMise à jour terminée : {resultat.ancienne} -> {resultat.nouvelle}.")
+    for ligne in resultat.verification.splitlines():
+        print(f"  {ligne}")
+    if resultat.nouveaux_reglages:
+        print("\nNouveaux réglages de cette version, absents de config.toml (valeur par défaut "
+              "appliquée,\nvoir config.reference.toml pour les changer) : "
+              + ", ".join(resultat.nouveaux_reglages))
+    if resultat.notes:
+        print(f"\n{resultat.notes}")
+    print("\nRelance le service (Planificateur de tâches > clic droit > Exécuter) et le tableau de bord.\n"
+          "En cas de problème plus tard : pt annuler-mise-a-jour")
+
+
+def cmd_annuler_mise_a_jour(config, args):
+    annulation = miseajour.preparer_annulation(RACINE_PROJET, config)
+    journal = annulation.journal
+    print(f"Retour de la version {journal['nouvelle']} à la version {journal['ancienne']} "
+          f"(mise à jour du {journal['date'][:16].replace('T', ' à ')}).")
+    if annulation.base_a_restaurer:
+        print("ATTENTION : cette mise à jour avait changé la structure de la base, que l'ancienne\n"
+              "version ne sait pas lire. La base d'AVANT la mise à jour va être remise : les\n"
+              "pointages, messages et paiements enregistrés depuis en disparaîtront (la base\n"
+              f"actuelle est gardée à part dans {annulation.secours}). Les pointages encore dans\n"
+              "la mémoire de la pointeuse seront relus, mais les paiements seront à ressaisir.")
+    else:
+        print("La base n'est pas touchée : aucun pointage ni paiement n'est perdu.")
+    if not args.oui and input("Tape ANNULER pour confirmer : ").strip().upper() != "ANNULER":
+        print("Abandon, rien n'a été modifié.")
+        return
+    miseajour.annuler(RACINE_PROJET, config, annulation)
+    print(f"Version {journal['ancienne']} remise en place. Relance le service et le tableau de bord.")
+
+
+def cmd_verifier_installation(config, args):
+    for ligne in miseajour.verifier_installation(config):
+        print(ligne)
+    print("Installation correcte.")
 
 
 # --- Analyse de la ligne de commande -------------------------------------------
@@ -494,6 +581,26 @@ def construire_parseur() -> argparse.ArgumentParser:
     s.add_argument("--source", help="nom ou IP du boîtier de départ (par défaut : le premier de config.toml)")
     s.add_argument("--oui", action="store_true", help="ne pas demander de confirmation")
     s.set_defaults(func=cmd_copier_empreintes)
+
+    sous.add_parser("version", help="version du logiciel et de la base").set_defaults(func=cmd_version)
+    sous.add_parser("creer-paquet",
+                    help="(développement) fabrique le paquet de mise à jour dans dist/"
+                    ).set_defaults(func=cmd_creer_paquet)
+
+    s = sous.add_parser("mettre-a-jour", help="installe un paquet ARIA_point_X.Y.Z.zip")
+    s.add_argument("fichier")
+    s.add_argument("--oui", action="store_true", help="ne pas demander de confirmation")
+    s.add_argument("--forcer", action="store_true",
+                   help="réinstaller la même version ou une plus ancienne")
+    s.set_defaults(func=cmd_mettre_a_jour)
+
+    s = sous.add_parser("annuler-mise-a-jour", help="revient à la version d'avant la dernière mise à jour")
+    s.add_argument("--oui", action="store_true", help="ne pas demander de confirmation")
+    s.set_defaults(func=cmd_annuler_mise_a_jour)
+
+    sous.add_parser("verifier-installation",
+                    help="contrôle que le logiciel tourne avec la configuration et la base de l'école"
+                    ).set_defaults(func=cmd_verifier_installation)
     return p
 
 

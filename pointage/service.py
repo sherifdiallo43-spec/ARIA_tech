@@ -17,7 +17,7 @@ from datetime import date
 
 import schedule
 
-from . import backup, collector, courriel, db, notifier, purge, reports
+from . import backup, collector, courriel, db, notifier, purge, reports, verrou
 from .config import Config
 from .device import creer_pointeuse
 
@@ -25,6 +25,19 @@ log = logging.getLogger(__name__)
 
 
 def lancer(config: Config) -> None:
+    try:
+        # Gardé jusqu'à l'arrêt du service. Deux services enverraient chaque message en double.
+        verrou_service = verrou.prendre(config, verrou.SERVICE)
+    except verrou.DejaEnCours:
+        raise SystemExit("Le service tourne déjà sur ce PC, ou une mise à jour est en cours. "
+                         "Rien n'a été lancé.") from None
+    try:
+        _lancer(config)
+    finally:
+        verrou.liberer(verrou_service)
+
+
+def _lancer(config: Config) -> None:
     conn = db.connecter(config.chemin("base"))
     db.initialiser(conn)
     pointeuse = creer_pointeuse(config)

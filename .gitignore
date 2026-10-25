@@ -8,6 +8,11 @@ archives/
 rapports/
 logs/
 
+# Mises à jour : paquets fabriqués, et fichiers déposés à l'école par une mise à jour
+dist/
+paquet.json
+config.reference.toml
+
 # Python
 .venv/
 __pycache__/

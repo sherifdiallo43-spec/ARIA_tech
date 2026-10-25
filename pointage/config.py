@@ -14,6 +14,7 @@ from datetime import time
 from pathlib import Path
 
 RACINE_PROJET = Path(__file__).resolve().parent.parent
+CONFIG_REFERENCE = "config.reference.toml"  # déposé par les mises à jour (voir charger)
 
 CLES_SECRETES = (
     "META_JETON",
@@ -72,19 +73,39 @@ class Config:
 
 
 def lire_toml(chemin: Path) -> dict:
-    with open(chemin, "rb") as f:
-        return tomllib.load(f)
+    # utf-8-sig : accepte aussi un fichier enregistré avec BOM (ancien Bloc-notes de Windows).
+    return tomllib.loads(Path(chemin).read_text(encoding="utf-8-sig"))
+
+
+def fusionner(reference: dict, ecole: dict) -> dict:
+    """Réglages de l'école, complétés par ceux de la référence quand ils manquent."""
+    resultat = dict(reference)
+    for cle, valeur in ecole.items():
+        if isinstance(valeur, dict) and isinstance(reference.get(cle), dict):
+            resultat[cle] = fusionner(reference[cle], valeur)
+        else:
+            resultat[cle] = valeur
+    return resultat
 
 
 def charger(chemin_config: Path | None = None) -> Config:
-    """Lit config.toml et .env (situés dans le même dossier)."""
+    """Lit config.toml et .env (situés dans le même dossier).
+
+    Après une mise à jour, config.reference.toml (le config.toml livré avec la nouvelle
+    version) est à côté : un réglage apparu dans la nouvelle version et absent du
+    config.toml de l'école y prend sa valeur par défaut, au lieu de faire planter le service.
+    """
     from dotenv import load_dotenv
 
     chemin_config = Path(chemin_config or RACINE_PROJET / "config.toml")
     racine = chemin_config.parent
     load_dotenv(racine / ".env")
     secrets = {cle: os.getenv(cle, "") for cle in CLES_SECRETES}
-    return Config.depuis_dict(racine, lire_toml(chemin_config), secrets)
+    donnees = lire_toml(chemin_config)
+    reference = racine / CONFIG_REFERENCE
+    if reference.exists():
+        donnees = fusionner(lire_toml(reference), donnees)
+    return Config.depuis_dict(racine, donnees, secrets)
 
 
 def lire_heure(texte: str) -> time:
